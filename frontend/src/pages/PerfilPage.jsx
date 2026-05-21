@@ -423,20 +423,25 @@ const bib = {
 };
 
 const FORMATOS = '.pdf,.pptx,.ppt,.docx,.doc';
+const FORMATOS_REF = '.pdf,.pptx,.ppt,.docx,.doc,.txt,.md';
 const MAX_MB = 50;
 
 export default function PerfilPage() {
-  const [perfil, setPerfil] = useState(null);      // { descricao, numApresentacoes, atualizadoEm }
+  const [perfil, setPerfil] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [arquivos, setArquivos] = useState([]);
+  const [referencias, setReferencias] = useState([]);
   const [dragging, setDragging] = useState(false);
+  const [draggingRef, setDraggingRef] = useState(false);
   const [analisando, setAnalisando] = useState(false);
   const [progresso, setProgresso] = useState('');
   const [editando, setEditando] = useState(false);
   const [textoEdicao, setTextoEdicao] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+  const [refreshBiblioteca, setRefreshBiblioteca] = useState(0);
   const inputRef = useRef();
+  const inputRefRef = useRef();
 
   useEffect(() => {
     api.get('/api/perfil').then(r => {
@@ -455,12 +460,30 @@ export default function PerfilPage() {
     });
   }, []);
 
+  const addReferencias = useCallback(files => {
+    const novos = Array.from(files).filter(f => {
+      const ext = f.name.split('.').pop().toLowerCase();
+      return FORMATOS_REF.includes(ext) && f.size <= MAX_MB * 1024 * 1024;
+    });
+    setReferencias(prev => {
+      const existentes = new Set(prev.map(a => a.name + a.size));
+      return [...prev, ...novos.filter(f => !existentes.has(f.name + f.size))];
+    });
+  }, []);
+
   const removerArquivo = i => setArquivos(prev => prev.filter((_, idx) => idx !== i));
+  const removerReferencia = i => setReferencias(prev => prev.filter((_, idx) => idx !== i));
 
   const onDrop = e => {
     e.preventDefault();
     setDragging(false);
     addArquivos(e.dataTransfer.files);
+  };
+
+  const onDropRef = e => {
+    e.preventDefault();
+    setDraggingRef(false);
+    addReferencias(e.dataTransfer.files);
   };
 
   const analisar = async () => {
@@ -484,6 +507,7 @@ export default function PerfilPage() {
     try {
       const form = new FormData();
       arquivos.forEach(f => form.append('apresentacoes', f));
+      referencias.forEach(f => form.append('referencias', f));
 
       const resp = await api.post('/api/perfil/adicionar', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -492,6 +516,8 @@ export default function PerfilPage() {
 
       setPerfil(resp.data);
       setArquivos([]);
+      setReferencias([]);
+      if (resp.data.numReferencias > 0) setRefreshBiblioteca(n => n + 1);
     } catch (err) {
       setErro(err.response?.data?.erro || 'Erro ao analisar apresentações.');
     } finally {
@@ -582,6 +608,52 @@ export default function PerfilPage() {
                 ))}
               </div>
             )}
+
+            {/* Referências opcionais */}
+            <div style={pf.refSection}>
+              <div style={pf.refLabel}>
+                <span style={pf.refLabelTitle}>📎 Referências dessas aulas</span>
+                <span style={pf.refLabelOpt}>opcional</span>
+              </div>
+              <div style={pf.refHint}>
+                Artigos, guidelines ou materiais que você usou para preparar essas aulas.
+                Serão salvos na biblioteca e vinculados automaticamente.
+              </div>
+              <div
+                style={{ ...pf.refDropzone, ...(draggingRef ? pf.dropzoneActive : {}) }}
+                onDragOver={e => { e.preventDefault(); setDraggingRef(true); }}
+                onDragLeave={() => setDraggingRef(false)}
+                onDrop={onDropRef}
+                onClick={() => inputRefRef.current?.click()}
+              >
+                <input
+                  ref={inputRefRef}
+                  type="file"
+                  multiple
+                  accept={FORMATOS_REF}
+                  style={{ display: 'none' }}
+                  onChange={e => addReferencias(e.target.files)}
+                />
+                <span style={{ fontSize: 18 }}>📄</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Arraste ou clique · PDF · PPTX · DOCX · TXT
+                </span>
+              </div>
+              {referencias.length > 0 && (
+                <div style={pf.listaArquivos}>
+                  {referencias.map((f, i) => (
+                    <div key={i} style={pf.arquivoItem}>
+                      <span style={{ fontSize: 14 }}>📎</span>
+                      <div style={pf.arquivoInfo}>
+                        <div style={pf.arquivoNome}>{f.name}</div>
+                        <div style={pf.arquivoSize}>{formatarTamanho(f.size)}</div>
+                      </div>
+                      <button onClick={() => removerReferencia(i)} style={pf.btnRemover} disabled={analisando}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {erro && <div style={pf.erro}>⚠ {erro}</div>}
 
@@ -675,7 +747,7 @@ export default function PerfilPage() {
         </div>
       </div>
 
-      <BibliotecaSection />
+      <BibliotecaSection key={refreshBiblioteca} />
     </div>
   );
 }
@@ -709,6 +781,23 @@ const pf = {
   btnRemover: { background: 'none', color: 'var(--muted)', fontSize: 11, padding: '2px 6px', borderRadius: 4, flexShrink: 0 },
 
   erro: { background: 'rgba(239,83,80,0.1)', border: '1px solid rgba(239,83,80,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#ef9a9a' },
+
+  refSection: {
+    borderTop: '1px solid var(--border)', paddingTop: 14,
+    display: 'flex', flexDirection: 'column', gap: 8,
+  },
+  refLabel: { display: 'flex', alignItems: 'center', gap: 8 },
+  refLabelTitle: { fontSize: 13, fontWeight: 600, color: 'var(--white-dim)' },
+  refLabelOpt: {
+    fontSize: 10, color: 'var(--muted)', background: 'rgba(255,255,255,0.05)',
+    border: '1px solid var(--border)', borderRadius: 10, padding: '1px 7px',
+  },
+  refHint: { fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 },
+  refDropzone: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    border: '1px dashed var(--border)', borderRadius: 8,
+    padding: '10px 14px', cursor: 'pointer', transition: 'all 0.2s',
+  },
 
   btnAnalisar: { padding: '14px', background: 'linear-gradient(135deg, var(--blue) 0%, #0d4f8c 100%)', color: 'var(--white)', fontSize: 14, borderRadius: 10, boxShadow: '0 6px 24px rgba(26,110,181,0.4)', letterSpacing: '0.02em' },
   aviso: { fontSize: 12, color: 'var(--muted)', textAlign: 'center' },

@@ -36,27 +36,79 @@ router.get('/', autenticar, (req, res) => {
   res.json({ perfil });
 });
 
-// POST /api/perfil/adicionar — adiciona apresentações e regenera o perfil
-router.post('/adicionar', autenticar, upload.array('apresentacoes', 20), async (req, res) => {
-  const arquivosUpload = req.files || [];
-  const arquivosPaths = arquivosUpload.map(f => f.path);
+// POST /api/perfil/adicionar — adiciona apresentações (+ referências opcionais) e regenera o perfil
+router.post('/adicionar', autenticar, upload.fields([
+  { name: 'apresentacoes', maxCount: 20 },
+  { name: 'referencias', maxCount: 20 },
+]), async (req, res) => {
+  const filesApresentacoes = req.files?.apresentacoes || [];
+  const filesReferencias  = req.files?.referencias  || [];
+  const allPaths = [
+    ...filesApresentacoes.map(f => f.path),
+    ...filesReferencias.map(f => f.path),
+  ];
 
   try {
-    if (arquivosUpload.length === 0) {
+    if (filesApresentacoes.length === 0) {
       return res.status(400).json({ erro: 'Envie ao menos uma apresentação' });
     }
 
-    // Extrair conteúdo das novas apresentações
-    console.log(`Extraindo conteúdo de ${arquivosUpload.length} apresentação(ões)...`);
+    // 1. Extrair conteúdo das apresentações (para análise de estilo)
+    console.log(`Extraindo conteúdo de ${filesApresentacoes.length} apresentação(ões)...`);
     const novasExtraidas = await Promise.all(
-      arquivosUpload.map(async f => ({
+      filesApresentacoes.map(async f => ({
         nome: f.originalname,
         conteudo: (await extractFileContent(f.path)).content || '',
         adicionadoEm: new Date().toISOString(),
       }))
     );
 
-    // Mesclar com apresentações já salvas
+    const agora = new Date().toISOString();
+
+    // 2. Salvar referências na biblioteca e obter IDs
+    let idsReferencias = [];
+    if (filesReferencias.length > 0) {
+      console.log(`Salvando ${filesReferencias.length} referência(s) na biblioteca...`);
+      const refsExtraidas = await Promise.all(
+        filesReferencias.map(f => extractFileContent(f.path))
+      );
+      idsReferencias = refsExtraidas.map((ext, i) => {
+        const f = filesReferencias[i];
+        const item = {
+          id: uuidv4(),
+          usuarioId: req.usuario.id,
+          nome: f.originalname,
+          tipo: path.extname(f.originalname).replace('.', '').toLowerCase(),
+          conteudo: ext.content || '',
+          tamanho: f.size,
+          adicionadoEm: agora,
+        };
+        db.get('biblioteca').push(item).write();
+        return item.id;
+      });
+    }
+
+    // 3. Criar registros históricos para as apresentações (fonte: 'perfil')
+    //    para que os vínculos apareçam no badge da biblioteca
+    if (idsReferencias.length > 0) {
+      filesApresentacoes.forEach(f => {
+        const titulo = path.basename(f.originalname, path.extname(f.originalname));
+        db.get('apresentacoes').push({
+          id: uuidv4(),
+          usuarioId: req.usuario.id,
+          tema: titulo,
+          titulo,
+          fonte: 'perfil',
+          numSlides: 0,
+          numArquivos: 1,
+          arquivos: [{ nome: f.originalname, tipo: path.extname(f.originalname) }],
+          bibliotecaIds: idsReferencias,
+          criadoEm: agora,
+        }).write();
+      });
+    }
+
+    // 4. Mesclar com apresentações anteriores do perfil e gerar estilo
     const perfilAtual = db.get('perfil').find({ usuarioId: req.usuario.id }).value();
     const apresentacoesAnteriores = perfilAtual?.apresentacoes || [];
     const todasApresentacoes = [...apresentacoesAnteriores, ...novasExtraidas]
@@ -66,44 +118,35 @@ router.post('/adicionar', autenticar, upload.array('apresentacoes', 20), async (
       return res.status(400).json({ erro: 'Não foi possível extrair conteúdo dos arquivos enviados' });
     }
 
-    // Gerar novo perfil com Claude
     console.log(`Gerando perfil de estilo com ${todasApresentacoes.length} apresentação(ões)...`);
     const descricao = await gerarPerfilEstilo(todasApresentacoes);
 
-    // Salvar no banco
-    const agora = new Date().toISOString();
     if (perfilAtual) {
       db.get('perfil').find({ usuarioId: req.usuario.id }).assign({
-        descricao,
-        apresentacoes: todasApresentacoes,
-        atualizadoEm: agora,
+        descricao, apresentacoes: todasApresentacoes, atualizadoEm: agora,
       }).write();
     } else {
       db.get('perfil').push({
         usuarioId: req.usuario.id,
-        descricao,
-        apresentacoes: todasApresentacoes,
-        criadoEm: agora,
-        atualizadoEm: agora,
+        descricao, apresentacoes: todasApresentacoes,
+        criadoEm: agora, atualizadoEm: agora,
       }).write();
     }
 
-    arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
+    allPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
 
     res.json({
       descricao,
       numApresentacoes: todasApresentacoes.length,
+      numReferencias: idsReferencias.length,
       atualizadoEm: agora,
     });
   } catch (err) {
-    arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
+    allPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
     console.error('Erro ao atualizar perfil:', err);
     const raw = err.message || '';
     let mensagem = raw;
-    try {
-      const parsed = JSON.parse(raw);
-      mensagem = parsed.error?.message || parsed.message || raw;
-    } catch {}
+    try { const parsed = JSON.parse(raw); mensagem = parsed.error?.message || parsed.message || raw; } catch {}
     if (raw.includes('credit balance') || raw.includes('billing')) {
       mensagem = 'Créditos da API insuficientes. Acesse console.anthropic.com para recarregar.';
     }
