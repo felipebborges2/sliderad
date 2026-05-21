@@ -103,8 +103,11 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
     let titulos = req.body.titulos;
     if (typeof titulos === 'string') titulos = JSON.parse(titulos);
 
-    // Extract optional biblioteca context
+    // Extract optional biblioteca context and IDs
     const bibliotecaContexto = req.body.bibliotecaContexto || '';
+    let bibliotecaIds = req.body.bibliotecaIds;
+    if (typeof bibliotecaIds === 'string') { try { bibliotecaIds = JSON.parse(bibliotecaIds); } catch { bibliotecaIds = []; } }
+    if (!Array.isArray(bibliotecaIds)) bibliotecaIds = [];
 
     // 1. Extrair conteúdo dos arquivos
     let arquivosExtraidos = [];
@@ -149,6 +152,7 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       numSlides: conteudo.slides ? conteudo.slides.length : 0,
       numArquivos: arquivosUpload.length,
       arquivos: arquivosUpload.map(f => ({ nome: f.originalname, tipo: path.extname(f.originalname) })),
+      bibliotecaIds,
       criadoEm: new Date().toISOString(),
       outputFile: `${id}.pptx`
     };

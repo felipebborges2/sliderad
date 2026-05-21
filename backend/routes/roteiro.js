@@ -56,6 +56,10 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
     if (typeof titulos === 'string') titulos = JSON.parse(titulos);
     if (!Array.isArray(titulos) || titulos.length === 0) return res.status(400).json({ erro: 'Informe ao menos um título' });
 
+    let bibliotecaIds = req.body.bibliotecaIds;
+    if (typeof bibliotecaIds === 'string') { try { bibliotecaIds = JSON.parse(bibliotecaIds); } catch { bibliotecaIds = []; } }
+    if (!Array.isArray(bibliotecaIds)) bibliotecaIds = [];
+
     // Extrair conteúdo dos arquivos de referência
     let arquivosExtraidos = [];
     if (arquivosUpload.length > 0) {
@@ -84,6 +88,7 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       titulos,
       slides: resultado.slides,
       contextoArquivos,
+      bibliotecaIds,
       criadoEm: new Date().toISOString(),
     }).write();
 

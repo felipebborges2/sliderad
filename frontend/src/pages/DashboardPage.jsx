@@ -352,6 +352,7 @@ export default function DashboardPage() {
   const [estruturaTitulos, setEstruturaTitulos] = useState([]);
   const [sugerindoEstrutura, setSugerindoEstrutura] = useState(false);
   const [bibliotecaContexto, setBibliotecaContexto] = useState('');
+  const [bibliotecaIds, setBibliotecaIds] = useState([]);
 
   const addArquivos = useCallback(files => {
     const novos = Array.from(files).filter(f => {
@@ -466,6 +467,7 @@ export default function DashboardPage() {
       form.append('tema', tema.trim());
       form.append('titulos', JSON.stringify(titulosValidos));
       if (bibliotecaContexto) form.append('bibliotecaContexto', bibliotecaContexto);
+      if (bibliotecaIds.length > 0) form.append('bibliotecaIds', JSON.stringify(bibliotecaIds));
       arquivos.forEach(f => form.append('arquivos', f));
 
       const resp = await api.post('/api/apresentacao/gerar', form, {
@@ -492,6 +494,7 @@ export default function DashboardPage() {
     setEtapaGerar('form');
     setEstruturaTitulos([]);
     setBibliotecaContexto('');
+    setBibliotecaIds([]);
     setErro('');
     setPreview(null);
   };
@@ -636,7 +639,10 @@ export default function DashboardPage() {
                         </div>
                       )}
 
-                      <BibliotecaSelector onSelecionar={ctx => setBibliotecaContexto(ctx)} />
+                      <BibliotecaSelector
+                        onSelecionar={ctx => setBibliotecaContexto(ctx)}
+                        onIds={ids => setBibliotecaIds(ids)}
+                      />
                     </div>
 
                     <div style={s.dicaCard}>

@@ -31,10 +31,37 @@ const upload = multer({
   }
 });
 
-// GET /api/biblioteca — list items for user (optionally with content)
+// GET /api/biblioteca — list items for user (optionally with content and/or usage data)
 router.get('/', autenticar, (req, res) => {
   const comConteudo = req.query.comConteudo === 'true';
+  const comUso = req.query.comUso === 'true';
   const itens = db.get('biblioteca').filter({ usuarioId: req.usuario.id }).value();
+
+  let usageMap = {};
+  if (comUso) {
+    const apresentacoes = db.get('apresentacoes').filter({ usuarioId: req.usuario.id }).value();
+    const roteiros = db.get('roteiros').filter({ usuarioId: req.usuario.id }).value();
+
+    itens.forEach(item => {
+      const usos = [];
+      apresentacoes.forEach(ap => {
+        if (Array.isArray(ap.bibliotecaIds) && ap.bibliotecaIds.includes(item.id)) {
+          usos.push({ tipo: 'apresentacao', titulo: ap.titulo || ap.tema, criadoEm: ap.criadoEm });
+        }
+      });
+      roteiros.forEach(rot => {
+        if (Array.isArray(rot.bibliotecaIds) && rot.bibliotecaIds.includes(item.id)) {
+          const titulo = Array.isArray(rot.titulos) && rot.titulos.length > 0
+            ? rot.titulos[0]
+            : 'Roteiro';
+          usos.push({ tipo: 'roteiro', titulo, criadoEm: rot.criadoEm });
+        }
+      });
+      // Most recent first
+      usos.sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
+      usageMap[item.id] = usos;
+    });
+  }
 
   const resultado = itens.map(item => {
     const base = {
@@ -42,9 +69,10 @@ router.get('/', autenticar, (req, res) => {
       nome: item.nome,
       tipo: item.tipo,
       tamanho: item.tamanho,
-      adicionadoEm: item.adicionadoEm
+      adicionadoEm: item.adicionadoEm,
     };
     if (comConteudo) base.conteudo = item.conteudo;
+    if (comUso) base.usadoEm = usageMap[item.id] || [];
     return base;
   });
 

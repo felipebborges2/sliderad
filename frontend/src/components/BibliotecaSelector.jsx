@@ -6,7 +6,7 @@ const formatarData = iso => {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-export default function BibliotecaSelector({ onSelecionar }) {
+export default function BibliotecaSelector({ onSelecionar, onIds }) {
   const [aberto, setAberto] = useState(false);
   const [itens, setItens] = useState([]);
   const [carregando, setCarregando] = useState(false);
@@ -39,6 +39,7 @@ export default function BibliotecaSelector({ onSelecionar }) {
         .join('\n\n');
 
       onSelecionar(contexto);
+      if (onIds) onIds(Array.from(next));
       return next;
     });
   };

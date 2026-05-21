@@ -82,6 +82,7 @@ export default function RoteiroPage() {
   const [erro, setErro] = useState('');
   const [resultado, setResultado] = useState(null); // { id, slides }
   const [bibliotecaContexto, setBibliotecaContexto] = useState('');
+  const [bibliotecaIds, setBibliotecaIds] = useState([]);
   const inputRef = useRef();
   const resultadoRef = useRef();
 
@@ -173,6 +174,7 @@ export default function RoteiroPage() {
       const form = new FormData();
       form.append('titulos', JSON.stringify(titulosValidos));
       if (bibliotecaContexto) form.append('bibliotecaContexto', bibliotecaContexto);
+      if (bibliotecaIds.length > 0) form.append('bibliotecaIds', JSON.stringify(bibliotecaIds));
       arquivos.forEach(f => form.append('arquivos', f));
 
       const resp = await api.post('/api/roteiro/gerar', form, {
@@ -215,6 +217,7 @@ export default function RoteiroPage() {
     setResultado(null);
     setTitulos(['']);
     setArquivos([]);
+    setBibliotecaIds([]);
     setErro('');
   };
 
@@ -325,7 +328,10 @@ export default function RoteiroPage() {
                 <div style={r.semArquivos}>Sem arquivos. A IA usará seu próprio conhecimento clínico</div>
               )}
 
-              <BibliotecaSelector onSelecionar={ctx => setBibliotecaContexto(ctx)} />
+              <BibliotecaSelector
+                onSelecionar={ctx => setBibliotecaContexto(ctx)}
+                onIds={ids => setBibliotecaIds(ids)}
+              />
             </div>
 
             <div style={r.dicaCard}>

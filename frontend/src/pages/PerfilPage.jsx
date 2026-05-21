@@ -16,11 +16,12 @@ function BibliotecaSection() {
   const [removendo, setRemovendo] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [erro, setErro] = useState('');
+  const [expandido, setExpandido] = useState(null); // id do item com usos expandidos
   const inputRef = useRef();
 
   const carregar = () => {
     setCarregando(true);
-    api.get('/api/biblioteca')
+    api.get('/api/biblioteca?comUso=true')
       .then(r => setItens(r.data.itens || []))
       .catch(() => {})
       .finally(() => setCarregando(false));
@@ -110,26 +111,53 @@ function BibliotecaSection() {
             <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Nenhuma referência salva ainda.</div>
           ) : (
             <div style={bib.lista}>
-              {itens.map(item => (
-                <div key={item.id} style={bib.item}>
-                  <div style={bib.itemInfo}>
-                    <span style={bib.itemNome}>{item.nome}</span>
-                    <div style={bib.itemMeta}>
-                      <span style={bib.tipoBadge}>{item.tipo.toUpperCase()}</span>
-                      <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarTamanho(item.tamanho)}</span>
-                      <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarDataBib(item.adicionadoEm)}</span>
+              {itens.map(item => {
+                const usos = item.usadoEm || [];
+                const isExpand = expandido === item.id;
+                return (
+                  <div key={item.id} style={bib.item}>
+                    <div style={bib.itemInfo}>
+                      <span style={bib.itemNome}>{item.nome}</span>
+                      <div style={bib.itemMeta}>
+                        <span style={bib.tipoBadge}>{item.tipo.toUpperCase()}</span>
+                        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarTamanho(item.tamanho)}</span>
+                        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarDataBib(item.adicionadoEm)}</span>
+                        {usos.length > 0 ? (
+                          <button
+                            onClick={() => setExpandido(isExpand ? null : item.id)}
+                            style={bib.badgeUso}
+                          >
+                            📎 {usos.length} aula{usos.length > 1 ? 's' : ''} {isExpand ? '▴' : '▾'}
+                          </button>
+                        ) : (
+                          <span style={bib.badgeSemUso}>Não usada ainda</span>
+                        )}
+                      </div>
+                      {isExpand && (
+                        <div style={bib.usoLista}>
+                          {usos.map((uso, i) => (
+                            <div key={i} style={bib.usoItem}>
+                              <span style={{ ...bib.usoTipo, color: uso.tipo === 'apresentacao' ? 'var(--cyan)' : '#b39ddb' }}>
+                                {uso.tipo === 'apresentacao' ? '⬡ PPTX' : '✎ Roteiro'}
+                              </span>
+                              <span style={bib.usoTitulo}>{uso.titulo}</span>
+                              <span style={bib.usoData}>{formatarDataBib(uso.criadoEm)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                    <button
+                      onClick={() => remover(item.id)}
+                      disabled={removendo === item.id}
+                      style={bib.btnRemover}
+                      title="Remover"
+                    >
+                      {removendo === item.id ? '...' : '✕'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => remover(item.id)}
-                    disabled={removendo === item.id}
-                    style={bib.btnRemover}
-                    title="Remover"
-                  >
-                    {removendo === item.id ? '...' : '✕'}
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -156,6 +184,35 @@ const bib = {
   itemMeta: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 },
   tipoBadge: { fontSize: 10, color: 'var(--cyan)', background: 'rgba(79,195,247,0.1)', border: '1px solid rgba(79,195,247,0.2)', borderRadius: 3, padding: '1px 5px', fontWeight: 600 },
   btnRemover: { background: 'none', color: 'var(--muted)', fontSize: 12, padding: '2px 6px', borderRadius: 4, flexShrink: 0, cursor: 'pointer' },
+
+  badgeUso: {
+    background: 'rgba(79,195,247,0.08)', border: '1px solid rgba(79,195,247,0.2)',
+    borderRadius: 10, padding: '1px 7px', fontSize: 10, color: 'var(--cyan)',
+    fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+  },
+  badgeSemUso: {
+    fontSize: 10, color: 'var(--muted)', fontStyle: 'italic',
+  },
+  usoLista: {
+    marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4,
+    borderTop: '1px solid var(--border)', paddingTop: 6,
+  },
+  usoItem: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '4px 6px', background: 'rgba(255,255,255,0.03)',
+    borderRadius: 5, minWidth: 0,
+  },
+  usoTipo: {
+    fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.05em', flexShrink: 0,
+  },
+  usoTitulo: {
+    fontSize: 11, color: 'rgba(255,255,255,0.75)',
+    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  usoData: {
+    fontSize: 10, color: 'var(--muted)', flexShrink: 0,
+  },
 };
 
 const FORMATOS = '.pdf,.pptx,.ppt,.docx,.doc';
