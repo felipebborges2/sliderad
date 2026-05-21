@@ -46,7 +46,7 @@ router.get('/', autenticar, (req, res) => {
       const usos = [];
       apresentacoes.forEach(ap => {
         if (Array.isArray(ap.bibliotecaIds) && ap.bibliotecaIds.includes(item.id)) {
-          usos.push({ tipo: 'apresentacao', titulo: ap.titulo || ap.tema, criadoEm: ap.criadoEm });
+          usos.push({ tipo: 'apresentacao', id: ap.id, titulo: ap.titulo || ap.tema, criadoEm: ap.criadoEm });
         }
       });
       roteiros.forEach(rot => {
@@ -54,7 +54,7 @@ router.get('/', autenticar, (req, res) => {
           const titulo = Array.isArray(rot.titulos) && rot.titulos.length > 0
             ? rot.titulos[0]
             : 'Roteiro';
-          usos.push({ tipo: 'roteiro', titulo, criadoEm: rot.criadoEm });
+          usos.push({ tipo: 'roteiro', id: rot.id, titulo, criadoEm: rot.criadoEm });
         }
       });
       // Most recent first
@@ -127,6 +127,32 @@ router.post('/adicionar', autenticar, upload.array('arquivos', 20), async (req, 
     console.error('Erro ao adicionar à biblioteca:', err);
     res.status(500).json({ erro: err.message || 'Erro ao processar arquivos' });
   }
+});
+
+// POST /api/biblioteca/vincular — manually link/unlink a biblioteca item to an aula
+router.post('/vincular', autenticar, (req, res) => {
+  const { itemId, aulaId, aulaType, vincular } = req.body;
+  if (!itemId || !aulaId || !aulaType || vincular == null) {
+    return res.status(400).json({ erro: 'itemId, aulaId, aulaType e vincular são obrigatórios' });
+  }
+
+  const item = db.get('biblioteca').find({ id: itemId, usuarioId: req.usuario.id }).value();
+  if (!item) return res.status(404).json({ erro: 'Item de biblioteca não encontrado' });
+
+  const collection = aulaType === 'apresentacao' ? 'apresentacoes' : 'roteiros';
+  const aula = db.get(collection).find({ id: aulaId, usuarioId: req.usuario.id }).value();
+  if (!aula) return res.status(404).json({ erro: 'Aula não encontrada' });
+
+  const ids = Array.isArray(aula.bibliotecaIds) ? [...aula.bibliotecaIds] : [];
+  if (vincular) {
+    if (!ids.includes(itemId)) ids.push(itemId);
+  } else {
+    const idx = ids.indexOf(itemId);
+    if (idx > -1) ids.splice(idx, 1);
+  }
+
+  db.get(collection).find({ id: aulaId }).assign({ bibliotecaIds: ids }).write();
+  res.json({ ok: true });
 });
 
 // DELETE /api/biblioteca/:id

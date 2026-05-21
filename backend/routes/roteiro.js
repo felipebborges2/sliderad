@@ -45,6 +45,22 @@ const upload = multer({
   },
 });
 
+// GET /api/roteiro/lista — lightweight list for link management UI
+router.get('/lista', autenticar, (req, res) => {
+  const roteiros = db.get('roteiros')
+    .filter({ usuarioId: req.usuario.id })
+    .value()
+    .map(r => ({
+      id: r.id,
+      titulo: Array.isArray(r.titulos) && r.titulos.length > 0 ? r.titulos[0] : 'Roteiro',
+      numSlides: Array.isArray(r.slides) ? r.slides.length : 0,
+      bibliotecaIds: r.bibliotecaIds || [],
+      criadoEm: r.criadoEm,
+    }))
+    .sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
+  res.json({ roteiros });
+});
+
 // POST /api/roteiro/gerar
 router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res) => {
   const arquivosUpload = req.files || [];
