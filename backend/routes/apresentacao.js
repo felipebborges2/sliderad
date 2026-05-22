@@ -91,37 +91,45 @@ router.post('/estrutura', autenticar, upload.array('arquivos', 10), async (req, 
   }
 });
 
-// POST /api/apresentacao/gerar
+// POST /api/apresentacao/gerar — responde via SSE para manter conexão viva durante geração longa
 router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res) => {
   const arquivosUpload = req.files || [];
   const arquivosPaths = arquivosUpload.map(f => f.path);
 
+  // Configura SSE antes de qualquer operação async
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {} };
+
+  // Heartbeat a cada 20s para não deixar a conexão ociosa em proxies
+  const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20000);
+
   try {
     const { tema } = req.body;
     if (!tema || !tema.trim()) {
-      return res.status(400).json({ erro: 'Tema é obrigatório' });
+      send({ type: 'error', mensagem: 'Tema é obrigatório' });
+      return res.end();
     }
 
-    // Parse optional titulos from body
     let titulos = req.body.titulos;
     if (typeof titulos === 'string') titulos = JSON.parse(titulos);
 
-    // Extract optional biblioteca context and IDs
     const bibliotecaContexto = req.body.bibliotecaContexto || '';
     let bibliotecaIds = req.body.bibliotecaIds;
     if (typeof bibliotecaIds === 'string') { try { bibliotecaIds = JSON.parse(bibliotecaIds); } catch { bibliotecaIds = []; } }
     if (!Array.isArray(bibliotecaIds)) bibliotecaIds = [];
 
-    // 1. Extrair conteúdo dos arquivos
+    // 1. Extrair arquivos
     let arquivosExtraidos = [];
     if (arquivosUpload.length > 0) {
+      send({ type: 'progress', mensagem: `Extraindo conteúdo de ${arquivosUpload.length} arquivo(s)…` });
       console.log(`Extraindo conteúdo de ${arquivosUpload.length} arquivo(s)...`);
-      arquivosExtraidos = await Promise.all(
-        arquivosUpload.map(f => extractFileContent(f.path))
-      );
+      arquivosExtraidos = await Promise.all(arquivosUpload.map(f => extractFileContent(f.path)));
     }
 
-    // Prepend biblioteca context to extracted files if provided
     if (bibliotecaContexto && bibliotecaContexto.trim()) {
       arquivosExtraidos = [
         { filename: 'Biblioteca de referências', type: 'txt', content: bibliotecaContexto },
@@ -129,16 +137,19 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       ];
     }
 
-    // 2. Gerar conteúdo com Claude
+    // 2. Gerar conteúdo — onProgress manda atualizações reais ao cliente
+    send({ type: 'progress', mensagem: 'Iniciando geração com IA…' });
     console.log(`Gerando conteúdo para: "${tema}"...`);
     const conteudo = await gerarConteudoApresentacao({
       tema: tema.trim(),
       arquivos: arquivosExtraidos,
       usuarioId: req.usuario.id,
-      titulos: titulos && titulos.length > 0 ? titulos : undefined
+      titulos: titulos && titulos.length > 0 ? titulos : undefined,
+      onProgress: (mensagem) => send({ type: 'progress', mensagem }),
     });
 
-    // 3. Salvar no histórico (slides incluídos para download futuro sem depender do disco)
+    // 3. Salvar no MongoDB
+    send({ type: 'progress', mensagem: 'Salvando apresentação…' });
     const id = uuidv4();
     const registro = {
       id,
@@ -154,26 +165,17 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
     };
     await db.insertOne('apresentacoes', registro);
 
-    // 4. Limpar uploads e responder com JSON para preview
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
-
-    res.json({
-      id,
-      titulo: conteudo.titulo || tema.trim(),
-      numSlides: registro.numSlides,
-      slides: conteudo.slides || []
-    });
+    send({ type: 'done', id, titulo: conteudo.titulo || tema.trim(), numSlides: registro.numSlides, slides: conteudo.slides || [] });
+    res.end();
 
   } catch (err) {
-    console.error('=== ERRO AO GERAR APRESENTAÇÃO ===');
-    console.error('Mensagem:', err.message);
-    console.error('Status:', err.status);
-    console.error('Stack:', err.stack);
-    // Limpar uploads em caso de erro
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
-    const mensagem = extrairMensagemErro(err);
-    console.error('Mensagem enviada ao client:', mensagem);
-    res.status(500).json({ erro: mensagem || 'Erro ao gerar apresentação.' });
+    console.error('=== ERRO AO GERAR APRESENTAÇÃO ===', err.message);
+    send({ type: 'error', mensagem: extrairMensagemErro(err) });
+    res.end();
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 

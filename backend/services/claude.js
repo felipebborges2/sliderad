@@ -163,7 +163,7 @@ Gere os slides para uma residente de radioterapia apresentar à equipe.`;
   }
 }
 
-async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos }) {
+async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos, onProgress }) {
   const contextoArquivos = arquivos
     .filter(a => a.content && a.content.trim())
     .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${trim(a.content, LIMITE_CONTEUDO)}`)
@@ -172,16 +172,18 @@ async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos })
   const temArquivos = contextoArquivos.length > 0;
   const perfilEstilo = await buscarPerfil(usuarioId);
 
-  // Presentações com muitos slides: divide em dois batches para evitar overload
+  // Apresentações com muitos slides: divide em dois batches para evitar overload
   if (titulos && titulos.length > 12) {
     const meio = Math.ceil(titulos.length / 2);
     const batch1Titulos = titulos.slice(0, meio);
     const batch2Titulos = titulos.slice(meio);
 
     console.log(`Gerando batch 1 (${batch1Titulos.length} slides)...`);
+    if (onProgress) onProgress(`Gerando slides 1 a ${meio} de ${titulos.length}…`);
     const batch1 = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: batch1Titulos, totalTitulos: titulos.length, isPrimeiro: true });
 
     console.log(`Gerando batch 2 (${batch2Titulos.length} slides)...`);
+    if (onProgress) onProgress(`Gerando slides ${meio + 1} a ${titulos.length} de ${titulos.length}…`);
     const batch2 = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: batch2Titulos, totalTitulos: titulos.length, isPrimeiro: false });
 
     return {
@@ -193,7 +195,9 @@ async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos })
   }
 
   // Apresentação pequena: uma única chamada
-  const resultado = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: titulos || [], totalTitulos: (titulos || []).length, isPrimeiro: true });
+  const total = (titulos || []).length;
+  if (onProgress) onProgress(`Gerando ${total > 0 ? total + ' slides' : 'apresentação'}…`);
+  const resultado = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: titulos || [], totalTitulos: total, isPrimeiro: true });
   return resultado;
 }
 

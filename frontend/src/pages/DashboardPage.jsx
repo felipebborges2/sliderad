@@ -440,27 +440,13 @@ export default function DashboardPage() {
     }
   };
 
-  // Step 2: generate with approved structure
+  // Step 2: generate with approved structure (SSE streaming para progresso real)
   const gerar = async () => {
     const titulosValidos = estruturaTitulos.filter(t => t.trim());
     if (titulosValidos.length === 0) { setErro('Informe ao menos um título'); return; }
     setErro('');
     setGerando(true);
-
-    const etapas = [
-      'Extraindo conteúdo dos arquivos de referência...',
-      'Analisando material clínico...',
-      'Gerando estrutura da apresentação com IA...',
-      'Elaborando conteúdo técnico slide a slide...',
-      'Montando design profissional...',
-      'Finalizando arquivo .pptx...',
-    ];
-    let ei = 0;
-    setProgresso(etapas[0]);
-    const interval = setInterval(() => {
-      ei = Math.min(ei + 1, etapas.length - 1);
-      setProgresso(etapas[ei]);
-    }, 7000);
+    setProgresso('Preparando…');
 
     try {
       const form = new FormData();
@@ -470,19 +456,49 @@ export default function DashboardPage() {
       if (bibliotecaIds.length > 0) form.append('bibliotecaIds', JSON.stringify(bibliotecaIds));
       arquivos.forEach(f => form.append('arquivos', f));
 
-      const resp = await api.post('/api/apresentacao/gerar', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 180000,
+      const token = localStorage.getItem('token');
+      const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+
+      const response = await fetch(`${baseURL}/api/apresentacao/gerar`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
       });
 
-      setPreview({ id: resp.data.id, titulo: resp.data.titulo, slides: resp.data.slides });
-      setEtapaGerar('preview');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let concluido = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const linhas = buffer.split('\n');
+        buffer = linhas.pop() ?? '';
+
+        for (const linha of linhas) {
+          if (!linha.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(linha.slice(6));
+            if (data.type === 'progress') {
+              setProgresso(data.mensagem);
+            } else if (data.type === 'done') {
+              concluido = true;
+              setPreview({ id: data.id, titulo: data.titulo, slides: data.slides });
+              setEtapaGerar('preview');
+            } else if (data.type === 'error') {
+              setErro(data.mensagem || 'Erro ao gerar apresentação.');
+            }
+          } catch {}
+        }
+      }
+
+      if (!concluido && !erro) setErro('Conexão encerrada antes de concluir. Tente novamente.');
     } catch (err) {
-      let msg = 'Erro ao gerar apresentação.';
-      if (err.response?.data?.erro) msg = err.response.data.erro;
-      setErro(msg);
+      setErro(err.message || 'Erro de conexão com o servidor.');
     } finally {
-      clearInterval(interval);
       setGerando(false);
       setProgresso('');
     }
