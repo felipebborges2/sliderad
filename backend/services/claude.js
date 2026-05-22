@@ -89,8 +89,81 @@ Gere a lista de títulos para uma apresentação completa sobre este tema.`;
   return dados.titulos || [];
 }
 
+// Gera um batch de slides (subset dos títulos)
+async function gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch, totalTitulos, isPrimeiro }) {
+  const blocoPerfilEstilo = perfilEstilo
+    ? `\nPERFIL DE ESTILO DA APRESENTADORA:\n${perfilEstilo}\nSiga fielmente esse perfil.\n`
+    : '';
+
+  const blocoTitulos = `\nSLIDES A GERAR (exatamente um por título, nesta ordem):\n${titulosBatch.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n`;
+
+  const contextoGeral = totalTitulos > titulosBatch.length
+    ? `\nEsta é a ${isPrimeiro ? 'primeira' : 'segunda'} parte de uma apresentação de ${totalTitulos} slides sobre "${tema}". Mantenha coerência com o restante.\n`
+    : '';
+
+  const formatoSlides = isPrimeiro
+    ? `{
+  "titulo": "Título principal da apresentação",
+  "subtitulo": "Subtítulo opcional",
+  "tema": "tema recebido",
+  "slides": [
+    { "tipo": "capa", "titulo": "...", "subtitulo": "...", "autor": "Residente de Radioterapia", "data": "2026" },
+    { "tipo": "agenda", "titulo": "Agenda", "itens": ["Tópico 1", "Tópico 2"] },
+    { "tipo": "conteudo", "titulo": "...", "pontos": ["ponto 1", "ponto 2"], "destaque": "...(opcional)", "fonte": "...(opcional)" },
+    { "tipo": "secao", "titulo": "...", "subtitulo": "...(opcional)" },
+    { "tipo": "tabela", "titulo": "...", "cabecalho": ["Col1","Col2"], "linhas": [["a","b"]], "fonte": "...(opcional)" },
+    { "tipo": "conclusao", "titulo": "...", "pontos": ["..."], "mensagem_final": "..." },
+    { "tipo": "referencias", "titulo": "Referências", "lista": ["ref 1"] }
+  ]
+}`
+    : `{
+  "slides": [
+    { "tipo": "conteudo", "titulo": "...", "pontos": ["ponto 1", "ponto 2"], "destaque": "...(opcional)" },
+    { "tipo": "secao", "titulo": "...", "subtitulo": "...(opcional)" },
+    { "tipo": "tabela", "titulo": "...", "cabecalho": ["Col1","Col2"], "linhas": [["a","b"]] },
+    { "tipo": "conclusao", "titulo": "...", "pontos": ["..."], "mensagem_final": "..." },
+    { "tipo": "referencias", "titulo": "Referências", "lista": ["ref 1"] }
+  ]
+}`;
+
+  const systemPrompt = `Você é um especialista em Física Médica e Radioterapia com amplo conhecimento clínico e acadêmico.
+${blocoPerfilEstilo}${blocoTitulos}${contextoGeral}
+REGRAS:
+1. Conteúdo tecnicamente preciso, profundo e clinicamente relevante.
+2. ${temArquivos ? 'DÊ MÁXIMA PRIORIDADE aos arquivos de referência. Use-os como base principal.' : 'Use seu conhecimento especializado.'}
+3. Inclua dados clínicos, valores numéricos e protocolos quando disponíveis.
+4. Linguagem técnica para profissionais de saúde em residência.
+5. PROIBIDO usar travessão (— ou -). Use dois pontos (:), vírgula ou ponto.
+6. Gere exatamente um slide para cada título listado.
+
+FORMATO (JSON ESTRITO, sem texto adicional):
+${formatoSlides}`;
+
+  const userPrompt = `Tema: "${tema}"
+
+${temArquivos ? `ARQUIVOS DE REFERÊNCIA:\n${contextoArquivos}` : 'Sem arquivos de referência — use seu conhecimento especializado.'}
+
+Gere os slides para uma residente de radioterapia apresentar à equipe.`;
+
+  const texto = await withRetry(async () => {
+    const stream = client.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    });
+    return (await stream.finalText()).trim();
+  });
+
+  const limpo = texto.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+  try {
+    return JSON.parse(limpo);
+  } catch (err) {
+    throw new Error('Erro ao interpretar resposta da IA: ' + err.message);
+  }
+}
+
 async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos }) {
-  // Monta contexto dos arquivos de referência
   const contextoArquivos = arquivos
     .filter(a => a.content && a.content.trim())
     .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${trim(a.content, LIMITE_CONTEUDO)}`)
@@ -99,118 +172,29 @@ async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos })
   const temArquivos = contextoArquivos.length > 0;
   const perfilEstilo = buscarPerfil(usuarioId);
 
-  const blocoPerfilEstilo = perfilEstilo
-    ? `\nPERFIL DE ESTILO DA APRESENTADORA:\n${perfilEstilo}\nAdapte estrutura, profundidade e formato da apresentação para seguir fielmente esse perfil.\n`
-    : '';
+  // Presentações com muitos slides: divide em dois batches para evitar overload
+  if (titulos && titulos.length > 12) {
+    const meio = Math.ceil(titulos.length / 2);
+    const batch1Titulos = titulos.slice(0, meio);
+    const batch2Titulos = titulos.slice(meio);
 
-  const blocoEstrutura = (titulos && titulos.length > 0)
-    ? `\nESTRUTURA APROVADA (siga EXATAMENTE esta ordem, um slide por título):\n${titulos.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n`
-    : '';
+    console.log(`Gerando batch 1 (${batch1Titulos.length} slides)...`);
+    const batch1 = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: batch1Titulos, totalTitulos: titulos.length, isPrimeiro: true });
 
-  const instrucaoQuantidade = (titulos && titulos.length > 0)
-    ? 'Gere exatamente um slide para cada título na estrutura aprovada acima.'
-    : `Determine a quantidade de slides necessária para cobrir o tema de forma completa, sem slides vazios nem conteúdo omitido.
-Diretrizes de quantidade:
-- Use quantos slides forem precisos para uma aula completa e densa
-- Temas simples ou focados: ~12–16 slides; temas amplos ou com muitos arquivos de referência: 20–30+ slides
-- Prefira criar um slide a mais a compactar demais o conteúdo em um único slide
-- A apresentação deve ser completa, densa em conteúdo e altamente profissional.`;
+    console.log(`Gerando batch 2 (${batch2Titulos.length} slides)...`);
+    const batch2 = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: batch2Titulos, totalTitulos: titulos.length, isPrimeiro: false });
 
-  const systemPrompt = `Você é um especialista em Física Médica e Radioterapia com amplo conhecimento clínico e acadêmico.
-Sua tarefa é gerar o conteúdo estruturado de uma apresentação didática de alta qualidade sobre um tema de radioterapia.
-${blocoPerfilEstilo}${blocoEstrutura}
-REGRAS FUNDAMENTAIS:
-1. O conteúdo deve ser tecnicamente preciso, profundo e clinicamente relevante
-2. ${temArquivos ? 'DÊ MÁXIMA PRIORIDADE ao conteúdo dos arquivos de referência fornecidos. Use-os como base principal.' : 'Use seu conhecimento especializado para gerar conteúdo robusto.'}
-3. ${temArquivos ? 'Quando complementar com informações não presentes nos arquivos, indique explicitamente: [Complemento: fonte ou conhecimento próprio]' : ''}
-4. A apresentação deve ser muito explicativa, didática e completa
-5. Inclua dados clínicos, valores numéricos, protocolos e referências quando disponíveis
-6. Use linguagem técnica apropriada para profissionais de saúde em residência
-7. PROIBIDO usar travessão (— ou -) em qualquer texto gerado. Substitua por dois pontos (:), ponto final (.), vírgula ou reescreva a frase sem ele
-
-FORMATO DE RESPOSTA (JSON ESTRITO):
-Responda APENAS com JSON válido, sem texto adicional, no seguinte formato:
-{
-  "titulo": "Título principal da apresentação",
-  "subtitulo": "Subtítulo opcional",
-  "tema": "tema recebido",
-  "slides": [
-    {
-      "tipo": "capa",
-      "titulo": "Título da apresentação",
-      "subtitulo": "Subtítulo",
-      "autor": "Residente de Radioterapia",
-      "data": "2025"
-    },
-    {
-      "tipo": "agenda",
-      "titulo": "Agenda",
-      "itens": ["Tópico 1", "Tópico 2", "Tópico 3"]
-    },
-    {
-      "tipo": "conteudo",
-      "titulo": "Título do slide",
-      "pontos": [
-        "Ponto principal com detalhe clínico relevante",
-        "Segundo ponto com dado numérico se aplicável"
-      ],
-      "destaque": "Informação-chave ou valor clínico importante (opcional)",
-      "fonte": "Referência ou arquivo de origem (opcional)"
-    },
-    {
-      "tipo": "secao",
-      "titulo": "Nome da Seção",
-      "subtitulo": "Descrição breve da seção"
-    },
-    {
-      "tipo": "tabela",
-      "titulo": "Título da tabela",
-      "cabecalho": ["Col1", "Col2", "Col3"],
-      "linhas": [["dado1", "dado2", "dado3"]],
-      "fonte": "Referência (opcional)"
-    },
-    {
-      "tipo": "conclusao",
-      "titulo": "Conclusões",
-      "pontos": ["Ponto 1", "Ponto 2"],
-      "mensagem_final": "Mensagem de fechamento"
-    },
-    {
-      "tipo": "referencias",
-      "titulo": "Referências",
-      "lista": ["Referência 1", "Referência 2"]
-    }
-  ]
-}
-
-${instrucaoQuantidade}`;
-
-  const userPrompt = `Tema da apresentação: "${tema}"
-
-${temArquivos ? `ARQUIVOS DE REFERÊNCIA FORNECIDOS:\n${contextoArquivos}` : 'Nenhum arquivo de referência fornecido. Use seu conhecimento especializado.'}
-
-Gere uma apresentação completa, técnica e didática sobre este tema para uma residente de radioterapia apresentar para sua equipe.`;
-
-  const texto = await withRetry(async () => {
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 16000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }]
-    });
-    return (await stream.finalText()).trim();
-  });
-
-  // Parse do JSON
-  let dados;
-  try {
-    const limpo = texto.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
-    dados = JSON.parse(limpo);
-  } catch (err) {
-    throw new Error('Erro ao interpretar resposta da IA: ' + err.message);
+    return {
+      titulo: batch1.titulo || tema,
+      subtitulo: batch1.subtitulo || '',
+      tema: batch1.tema || tema,
+      slides: [...(batch1.slides || []), ...(batch2.slides || [])],
+    };
   }
 
-  return dados;
+  // Apresentação pequena: uma única chamada
+  const resultado = await gerarBatch({ tema, contextoArquivos, temArquivos, perfilEstilo, titulosBatch: titulos || [], totalTitulos: (titulos || []).length, isPrimeiro: true });
+  return resultado;
 }
 
 module.exports = { gerarConteudoApresentacao, sugerirEstrutura };
