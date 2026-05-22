@@ -5,7 +5,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Limites de conteúdo por tipo de chamada (chars → tokens ÷ 4)
 const LIMITE_ESTRUTURA   =  4000; // ~1k tokens por arquivo — só precisa entender tópicos
-const LIMITE_CONTEUDO    = 60000; // ~15k tokens por arquivo — arquivos longos de referência
+const LIMITE_CONTEUDO    = 40000; // ~10k tokens por arquivo — bom equilíbrio qualidade/custo
 
 function trim(text, max) {
   if (!text || text.length <= max) return text;
@@ -194,7 +194,7 @@ Gere uma apresentação completa, técnica e didática sobre este tema para uma 
   const texto = await withRetry(async () => {
     const stream = client.messages.stream({
       model: 'claude-sonnet-4-6',
-      max_tokens: 32000,
+      max_tokens: 16000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }]
     });

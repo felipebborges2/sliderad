@@ -90,7 +90,7 @@ Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natu
   const texto = await withRetry(async () => {
     const stream = client.messages.stream({
       model: 'claude-sonnet-4-6',
-      max_tokens: 32000,
+      max_tokens: 16000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
