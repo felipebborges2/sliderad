@@ -71,7 +71,7 @@ Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natu
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
+    max_tokens: 32000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });

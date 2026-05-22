@@ -174,7 +174,7 @@ Gere uma apresentação completa, técnica e didática sobre este tema para uma 
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 16000, // 25 slides densos em JSON podem facilmente passar de 8k tokens
+    max_tokens: 32000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
   });
