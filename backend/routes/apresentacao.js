@@ -169,10 +169,15 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
     });
 
   } catch (err) {
-    console.error('Erro ao gerar apresentação:', err);
+    console.error('=== ERRO AO GERAR APRESENTAÇÃO ===');
+    console.error('Mensagem:', err.message);
+    console.error('Status:', err.status);
+    console.error('Stack:', err.stack);
     // Limpar uploads em caso de erro
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
-    res.status(500).json({ erro: extrairMensagemErro(err) });
+    const mensagem = extrairMensagemErro(err);
+    console.error('Mensagem enviada ao client:', mensagem);
+    res.status(500).json({ erro: mensagem || 'Erro ao gerar apresentação.' });
   }
 });
 
