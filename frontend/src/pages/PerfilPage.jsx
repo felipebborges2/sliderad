@@ -892,12 +892,15 @@ const pf = {
   },
   refAulaCheckLabel: {
     display: 'flex', alignItems: 'center', gap: 8,
-    fontSize: 12, color: 'var(--white-dim)',
-    padding: '3px 4px', borderRadius: 5, cursor: 'pointer',
+    fontSize: 12, color: 'rgba(255,255,255,0.8)',
+    padding: '4px 6px', borderRadius: 5, cursor: 'pointer',
+    width: '100%', boxSizing: 'border-box',
   },
   refAulaNome: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-    flex: 1,
+    flex: 1, minWidth: 0,
   },
 
   btnAnalisar: { padding: '14px', background: 'linear-gradient(135deg, var(--blue) 0%, #0d4f8c 100%)', color: 'var(--white)', fontSize: 14, borderRadius: 10, boxShadow: '0 6px 24px rgba(26,110,181,0.4)', letterSpacing: '0.02em' },
