@@ -17,11 +17,6 @@ function BibliotecaSection() {
   const [dragging, setDragging] = useState(false);
   const [erro, setErro] = useState('');
   const [expandido, setExpandido] = useState(null);
-  // Vincular state
-  const [vincularAberto, setVincularAberto] = useState(null); // id do item sendo vinculado
-  const [aulasDisponiveis, setAulasDisponiveis] = useState(null); // { apresentacoes, roteiros }
-  const [aulasCarregando, setAulasCarregando] = useState(false);
-  const [vinculando, setVinculando] = useState(new Set()); // Set<'tipo:aulaId'>
   const inputRef = useRef();
 
   const carregar = () => {
@@ -30,69 +25,6 @@ function BibliotecaSection() {
       .then(r => setItens(r.data.itens || []))
       .catch(() => {})
       .finally(() => setCarregando(false));
-  };
-
-  const carregarAulas = async () => {
-    if (aulasDisponiveis) return;
-    setAulasCarregando(true);
-    try {
-      const [histResp, rotResp] = await Promise.all([
-        api.get('/api/historico?incluirPerfil=true'),
-        api.get('/api/roteiro/lista'),
-      ]);
-      setAulasDisponiveis({
-        apresentacoes: histResp.data || [],
-        roteiros: rotResp.data.roteiros || [],
-      });
-    } catch {
-      setAulasDisponiveis({ apresentacoes: [], roteiros: [] });
-    } finally {
-      setAulasCarregando(false);
-    }
-  };
-
-  const abrirVincular = (itemId) => {
-    setVincularAberto(itemId);
-    setExpandido(null);
-    carregarAulas();
-  };
-
-  const toggleVinculo = async (itemId, aulaId, aulaType, atualmenteVinculado) => {
-    const key = `${aulaType}:${aulaId}`;
-    setVinculando(prev => new Set(prev).add(key));
-    try {
-      await api.post('/api/biblioteca/vincular', {
-        itemId, aulaId, aulaType, vincular: !atualmenteVinculado,
-      });
-      setItens(prev => prev.map(item => {
-        if (item.id !== itemId) return item;
-        const usadoEm = item.usadoEm || [];
-        if (!atualmenteVinculado) {
-          const listaAulas = aulaType === 'apresentacao'
-            ? aulasDisponiveis.apresentacoes
-            : aulasDisponiveis.roteiros;
-          const aula = listaAulas.find(a => a.id === aulaId);
-          return {
-            ...item,
-            usadoEm: [...usadoEm, {
-              tipo: aulaType,
-              id: aulaId,
-              titulo: aula ? (aula.titulo || aula.tema) : 'Aula',
-              criadoEm: aula ? aula.criadoEm : new Date().toISOString(),
-            }],
-          };
-        } else {
-          return {
-            ...item,
-            usadoEm: usadoEm.filter(u => !(u.tipo === aulaType && u.id === aulaId)),
-          };
-        }
-      }));
-    } catch {
-      /* silencia erro de rede */
-    } finally {
-      setVinculando(prev => { const s = new Set(prev); s.delete(key); return s; });
-    }
   };
 
   useEffect(() => { carregar(); }, []);
@@ -168,155 +100,65 @@ function BibliotecaSection() {
           {erro && <div style={bib.erro}>⚠ {erro}</div>}
         </div>
 
-        {/* Lista / Painel de vinculação */}
+        {/* Lista de itens salvos */}
         <div style={bib.card}>
-          {vincularAberto ? (
-            /* ── modo vincular ── */
-            <>
-              <div style={bib.vincularTop}>
-                <button onClick={() => setVincularAberto(null)} style={bib.btnVoltar}>← Voltar</button>
-                <div style={bib.cardLabel}>Vincular referência</div>
-              </div>
-              <div style={bib.vincularItemNome}>
-                {itens.find(i => i.id === vincularAberto)?.nome}
-              </div>
-
-              {aulasCarregando ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
-                  <span className="spinner" style={{ width: 12, height: 12 }} /> Carregando aulas...
-                </div>
-              ) : !aulasDisponiveis || (aulasDisponiveis.apresentacoes.length === 0 && aulasDisponiveis.roteiros.length === 0) ? (
-                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
-                  Nenhuma aula gerada ainda. Gere uma apresentação ou roteiro primeiro.
-                </div>
-              ) : (
-                <div style={bib.aulaLista}>
-                  {aulasDisponiveis.apresentacoes.length > 0 && (
-                    <>
-                      <div style={bib.aulaGrupoLabel}>⬡ Apresentações</div>
-                      {aulasDisponiveis.apresentacoes.map(ap => {
-                        const linked = (itens.find(i => i.id === vincularAberto)?.usadoEm || [])
-                          .some(u => u.tipo === 'apresentacao' && u.id === ap.id);
-                        const key = `apresentacao:${ap.id}`;
-                        return (
-                          <label key={ap.id} style={{ ...bib.aulaItem, opacity: vinculando.has(key) ? 0.6 : 1 }}>
-                            <input
-                              type="checkbox"
-                              checked={linked}
-                              disabled={vinculando.has(key)}
-                              onChange={() => toggleVinculo(vincularAberto, ap.id, 'apresentacao', linked)}
-                              style={bib.aulaCheck}
-                            />
-                            <div style={bib.aulaInfo}>
-                              <span style={bib.aulaTitulo}>{ap.titulo || ap.tema}</span>
-                              <span style={bib.aulaData}>
-                                {ap.fonte === 'perfil' ? 'Aula do perfil · ' : ''}{formatarDataBib(ap.criadoEm)}
-                              </span>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </>
-                  )}
-                  {aulasDisponiveis.roteiros.length > 0 && (
-                    <>
-                      <div style={{ ...bib.aulaGrupoLabel, marginTop: aulasDisponiveis.apresentacoes.length > 0 ? 12 : 0 }}>✎ Roteiros</div>
-                      {aulasDisponiveis.roteiros.map(rot => {
-                        const linked = (itens.find(i => i.id === vincularAberto)?.usadoEm || [])
-                          .some(u => u.tipo === 'roteiro' && u.id === rot.id);
-                        const key = `roteiro:${rot.id}`;
-                        return (
-                          <label key={rot.id} style={{ ...bib.aulaItem, opacity: vinculando.has(key) ? 0.6 : 1 }}>
-                            <input
-                              type="checkbox"
-                              checked={linked}
-                              disabled={vinculando.has(key)}
-                              onChange={() => toggleVinculo(vincularAberto, rot.id, 'roteiro', linked)}
-                              style={bib.aulaCheck}
-                            />
-                            <div style={bib.aulaInfo}>
-                              <span style={bib.aulaTitulo}>{rot.titulo}</span>
-                              <span style={bib.aulaData}>{formatarDataBib(rot.criadoEm)}</span>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-              )}
-            </>
+          <div style={bib.cardLabel}>Itens salvos {itens.length > 0 && `(${itens.length})`}</div>
+          {carregando ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
+              <span className="spinner" style={{ width: 12, height: 12 }} /> Carregando...
+            </div>
+          ) : itens.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Nenhuma referência salva ainda.</div>
           ) : (
-            /* ── modo lista normal ── */
-            <>
-              <div style={bib.cardLabel}>Itens salvos {itens.length > 0 && `(${itens.length})`}</div>
-              {carregando ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
-                  <span className="spinner" style={{ width: 12, height: 12 }} /> Carregando...
-                </div>
-              ) : itens.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Nenhuma referência salva ainda.</div>
-              ) : (
-                <div style={bib.lista}>
-                  {itens.map(item => {
-                    const usos = item.usadoEm || [];
-                    const isExpand = expandido === item.id;
-                    return (
-                      <div key={item.id} style={bib.item}>
-                        <div style={bib.itemInfo}>
-                          <span style={bib.itemNome}>{item.nome}</span>
-                          <div style={bib.itemMeta}>
-                            <span style={bib.tipoBadge}>{item.tipo.toUpperCase()}</span>
-                            <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarTamanho(item.tamanho)}</span>
-                            <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarDataBib(item.adicionadoEm)}</span>
-                            {usos.length > 0 ? (
-                              <button
-                                onClick={() => setExpandido(isExpand ? null : item.id)}
-                                style={bib.badgeUso}
-                              >
-                                📎 {usos.length} aula{usos.length > 1 ? 's' : ''} {isExpand ? '▴' : '▾'}
-                              </button>
-                            ) : (
-                              <span style={bib.badgeSemUso}>Não vinculada</span>
-                            )}
-                          </div>
-                          {isExpand && (
-                            <div style={bib.usoLista}>
-                              {usos.map((uso, i) => (
-                                <div key={i} style={bib.usoItem}>
-                                  <span style={{ ...bib.usoTipo, color: uso.tipo === 'apresentacao' ? 'var(--cyan)' : '#b39ddb' }}>
-                                    {uso.tipo === 'apresentacao' ? '⬡ PPTX' : '✎ Roteiro'}
-                                  </span>
-                                  <span style={bib.usoTitulo}>{uso.titulo}</span>
-                                  <span style={bib.usoData}>{formatarDataBib(uso.criadoEm)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+            <div style={bib.lista}>
+              {itens.map(item => {
+                const usos = item.usadoEm || [];
+                const isExpand = expandido === item.id;
+                return (
+                  <div key={item.id} style={bib.item}>
+                    <div style={bib.itemInfo}>
+                      <span style={bib.itemNome}>{item.nome}</span>
+                      <div style={bib.itemMeta}>
+                        <span style={bib.tipoBadge}>{item.tipo.toUpperCase()}</span>
+                        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarTamanho(item.tamanho)}</span>
+                        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{formatarDataBib(item.adicionadoEm)}</span>
+                        {usos.length > 0 ? (
                           <button
-                            onClick={() => abrirVincular(item.id)}
-                            style={bib.btnVincular}
-                            title="Vincular a aulas"
+                            onClick={() => setExpandido(isExpand ? null : item.id)}
+                            style={bib.badgeUso}
                           >
-                            🔗
+                            📎 {usos.length} aula{usos.length > 1 ? 's' : ''} {isExpand ? '▴' : '▾'}
                           </button>
-                          <button
-                            onClick={() => remover(item.id)}
-                            disabled={removendo === item.id}
-                            style={bib.btnRemover}
-                            title="Remover"
-                          >
-                            {removendo === item.id ? '...' : '✕'}
-                          </button>
-                        </div>
+                        ) : (
+                          <span style={bib.badgeSemUso}>Não vinculada</span>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+                      {isExpand && (
+                        <div style={bib.usoLista}>
+                          {usos.map((uso, i) => (
+                            <div key={i} style={bib.usoItem}>
+                              <span style={{ ...bib.usoTipo, color: uso.tipo === 'apresentacao' ? 'var(--cyan)' : '#b39ddb' }}>
+                                {uso.tipo === 'apresentacao' ? '⬡ PPTX' : '✎ Roteiro'}
+                              </span>
+                              <span style={bib.usoTitulo}>{uso.titulo}</span>
+                              <span style={bib.usoData}>{formatarDataBib(uso.criadoEm)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => remover(item.id)}
+                      disabled={removendo === item.id}
+                      style={bib.btnRemover}
+                      title="Remover"
+                    >
+                      {removendo === item.id ? '...' : '✕'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -372,56 +214,6 @@ const bib = {
     fontSize: 10, color: 'var(--muted)', flexShrink: 0,
   },
 
-  btnVincular: {
-    background: 'none', color: 'var(--muted)', fontSize: 13,
-    padding: '2px 5px', borderRadius: 4, cursor: 'pointer',
-    transition: 'color 0.15s',
-  },
-
-  // Painel de vinculação
-  vincularTop: {
-    display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4,
-  },
-  btnVoltar: {
-    background: 'none', color: 'var(--muted)', fontSize: 12,
-    padding: '3px 8px', border: '1px solid var(--border)',
-    borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
-  },
-  vincularItemNome: {
-    fontSize: 12, color: 'var(--white-dim)', fontWeight: 600,
-    padding: '6px 10px', background: 'var(--navy2)',
-    border: '1px solid var(--border)', borderRadius: 6,
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  },
-  aulaLista: {
-    display: 'flex', flexDirection: 'column', gap: 4,
-    maxHeight: 320, overflowY: 'auto',
-  },
-  aulaGrupoLabel: {
-    fontSize: 10, fontWeight: 700, color: 'var(--cyan)',
-    textTransform: 'uppercase', letterSpacing: '0.07em',
-    paddingBottom: 4, borderBottom: '1px solid var(--border)',
-    marginBottom: 2,
-  },
-  aulaItem: {
-    display: 'flex', alignItems: 'center', gap: 10,
-    padding: '7px 8px', borderRadius: 6, cursor: 'pointer',
-    background: 'var(--navy2)', border: '1px solid var(--border)',
-    transition: 'border-color 0.15s',
-  },
-  aulaCheck: {
-    accentColor: 'var(--cyan)', flexShrink: 0,
-  },
-  aulaInfo: {
-    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1,
-  },
-  aulaTitulo: {
-    fontSize: 12, color: 'var(--white)',
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  },
-  aulaData: {
-    fontSize: 10, color: 'var(--muted)',
-  },
 };
 
 const FORMATOS = '.pdf,.pptx,.ppt,.docx,.doc';
