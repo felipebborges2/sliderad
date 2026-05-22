@@ -5,22 +5,22 @@ const db = require('../services/db');
 const router = express.Router();
 
 // GET /api/historico
-router.get('/', autenticar, (req, res) => {
+router.get('/', autenticar, async (req, res) => {
   const incluirPerfil = req.query.incluirPerfil === 'true';
-  const apresentacoes = db.get('apresentacoes')
-    .filter(ap => ap.usuarioId === req.usuario.id && (incluirPerfil || ap.fonte !== 'perfil'))
-    .orderBy('criadoEm', 'desc')
-    .value();
+  const filter = { usuarioId: req.usuario.id };
+  if (!incluirPerfil) filter.fonte = { $ne: 'perfil' };
+
+  const apresentacoes = await db.find('apresentacoes', filter, { criadoEm: -1 });
   res.json(apresentacoes);
 });
 
 // DELETE /api/historico/:id
-router.delete('/:id', autenticar, (req, res) => {
+router.delete('/:id', autenticar, async (req, res) => {
   const { id } = req.params;
-  const existe = db.get('apresentacoes').find({ id, usuarioId: req.usuario.id }).value();
+  const existe = await db.findOne('apresentacoes', { id, usuarioId: req.usuario.id });
   if (!existe) return res.status(404).json({ erro: 'Não encontrado' });
 
-  db.get('apresentacoes').remove({ id, usuarioId: req.usuario.id }).write();
+  await db.deleteOne('apresentacoes', { id, usuarioId: req.usuario.id });
   res.json({ ok: true });
 });
 

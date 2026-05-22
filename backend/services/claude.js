@@ -31,8 +31,8 @@ async function withRetry(fn, maxAttempts = 3, baseDelay = 8000) {
   }
 }
 
-function buscarPerfil(usuarioId) {
-  const perfil = db.get('perfil').find({ usuarioId }).value();
+async function buscarPerfil(usuarioId) {
+  const perfil = await db.findOne('perfil', { usuarioId });
   return perfil?.descricao || null;
 }
 
@@ -44,7 +44,7 @@ async function sugerirEstrutura({ tema, arquivos, usuarioId }) {
     .join('\n\n');
 
   const temArquivos = contextoArquivos.length > 0;
-  const perfilEstilo = buscarPerfil(usuarioId);
+  const perfilEstilo = await buscarPerfil(usuarioId);
 
   const blocoPerfilEstilo = perfilEstilo
     ? `\nPERFIL DE ESTILO DA APRESENTADORA:\n${perfilEstilo}\nUse esse perfil para guiar a estrutura e a quantidade de slides.\n`
@@ -170,7 +170,7 @@ async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos })
     .join('\n\n');
 
   const temArquivos = contextoArquivos.length > 0;
-  const perfilEstilo = buscarPerfil(usuarioId);
+  const perfilEstilo = await buscarPerfil(usuarioId);
 
   // Presentações com muitos slides: divide em dois batches para evitar overload
   if (titulos && titulos.length > 12) {

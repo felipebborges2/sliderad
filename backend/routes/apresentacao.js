@@ -159,7 +159,7 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       criadoEm: new Date().toISOString(),
       outputFile: `${id}.pptx`
     };
-    db.get('apresentacoes').push(registro).write();
+    await db.insertOne('apresentacoes', registro);
 
     // 5. Limpar uploads e responder com JSON para preview
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
@@ -221,9 +221,9 @@ router.post('/exportar', autenticar, async (req, res) => {
 });
 
 // GET /api/apresentacao/download/:id
-router.get('/download/:id', autenticar, (req, res) => {
+router.get('/download/:id', autenticar, async (req, res) => {
   const { id } = req.params;
-  const registro = db.get('apresentacoes').find({ id, usuarioId: req.usuario.id }).value();
+  const registro = await db.findOne('apresentacoes', { id, usuarioId: req.usuario.id });
   if (!registro) return res.status(404).json({ erro: 'Apresentação não encontrada' });
 
   const filePath = path.join(__dirname, '..', 'outputs', registro.outputFile);

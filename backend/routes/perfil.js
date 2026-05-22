@@ -30,13 +30,13 @@ const upload = multer({
   },
 });
 
-// GET /api/perfil — retorna o perfil atual
-router.get('/', autenticar, (req, res) => {
-  const perfil = db.get('perfil').find({ usuarioId: req.usuario.id }).value() || null;
+// GET /api/perfil
+router.get('/', autenticar, async (req, res) => {
+  const perfil = await db.findOne('perfil', { usuarioId: req.usuario.id }) || null;
   res.json({ perfil });
 });
 
-// POST /api/perfil/adicionar — adiciona apresentações (+ referências opcionais) e regenera o perfil
+// POST /api/perfil/adicionar
 router.post('/adicionar', autenticar, upload.fields([
   { name: 'apresentacoes', maxCount: 20 },
   { name: 'referencias', maxCount: 20 },
@@ -49,11 +49,9 @@ router.post('/adicionar', autenticar, upload.fields([
   ];
 
   try {
-    if (filesApresentacoes.length === 0) {
+    if (filesApresentacoes.length === 0)
       return res.status(400).json({ erro: 'Envie ao menos uma apresentação' });
-    }
 
-    // 1. Extrair conteúdo das apresentações (para análise de estilo)
     console.log(`Extraindo conteúdo de ${filesApresentacoes.length} apresentação(ões)...`);
     const novasExtraidas = await Promise.all(
       filesApresentacoes.map(async f => ({
@@ -65,14 +63,12 @@ router.post('/adicionar', autenticar, upload.fields([
 
     const agora = new Date().toISOString();
 
-    // 2. Salvar referências na biblioteca e obter IDs
+    // Salvar referências na biblioteca
     let idsReferencias = [];
     if (filesReferencias.length > 0) {
       console.log(`Salvando ${filesReferencias.length} referência(s) na biblioteca...`);
-      const refsExtraidas = await Promise.all(
-        filesReferencias.map(f => extractFileContent(f.path))
-      );
-      idsReferencias = refsExtraidas.map((ext, i) => {
+      const refsExtraidas = await Promise.all(filesReferencias.map(f => extractFileContent(f.path)));
+      idsReferencias = await Promise.all(refsExtraidas.map(async (ext, i) => {
         const f = filesReferencias[i];
         const item = {
           id: uuidv4(),
@@ -83,126 +79,98 @@ router.post('/adicionar', autenticar, upload.fields([
           tamanho: f.size,
           adicionadoEm: agora,
         };
-        db.get('biblioteca').push(item).write();
+        await db.insertOne('biblioteca', item);
         return item.id;
-      });
+      }));
     }
 
-    // 3. Criar registros históricos para as apresentações (fonte: 'perfil')
-    //    usando o mapeamento individual links[refIdx] = [aulaIdx, ...]
+    // Criar registros históricos para aulas com referências vinculadas
     if (idsReferencias.length > 0) {
       let links = [];
       try { links = JSON.parse(req.body.links || '[]'); } catch {}
 
-      // Para cada aula, coleta quais IDs de referência estão vinculados a ela
       const refIdsPorAula = filesApresentacoes.map(() => []);
       idsReferencias.forEach((refId, refIdx) => {
         const aulaIndices = Array.isArray(links[refIdx]) ? links[refIdx] : [];
         aulaIndices.forEach(aulaIdx => {
-          if (aulaIdx >= 0 && aulaIdx < filesApresentacoes.length) {
+          if (aulaIdx >= 0 && aulaIdx < filesApresentacoes.length)
             refIdsPorAula[aulaIdx].push(refId);
-          }
         });
       });
 
-      filesApresentacoes.forEach((f, i) => {
-        if (refIdsPorAula[i].length === 0) return; // sem referências vinculadas, sem registro
+      await Promise.all(filesApresentacoes.map(async (f, i) => {
+        if (refIdsPorAula[i].length === 0) return;
         const titulo = path.basename(f.originalname, path.extname(f.originalname));
-        db.get('apresentacoes').push({
+        await db.insertOne('apresentacoes', {
           id: uuidv4(),
           usuarioId: req.usuario.id,
-          tema: titulo,
-          titulo,
+          tema: titulo, titulo,
           fonte: 'perfil',
-          numSlides: 0,
-          numArquivos: 1,
+          numSlides: 0, numArquivos: 1,
           arquivos: [{ nome: f.originalname, tipo: path.extname(f.originalname) }],
           bibliotecaIds: refIdsPorAula[i],
           criadoEm: agora,
-        }).write();
-      });
+        });
+      }));
     }
 
-    // 4. Gerar/refinar estilo
-    const perfilAtual = db.get('perfil').find({ usuarioId: req.usuario.id }).value();
+    // Gerar/refinar perfil de estilo
+    const perfilAtual = await db.findOne('perfil', { usuarioId: req.usuario.id });
     const novasValidas = novasExtraidas.filter(a => a.conteudo && a.conteudo.trim());
 
-    if (novasValidas.length === 0) {
+    if (novasValidas.length === 0)
       return res.status(400).json({ erro: 'Não foi possível extrair conteúdo dos arquivos enviados' });
-    }
 
     let descricao;
     if (perfilAtual?.descricao) {
-      // Já existe perfil: refinar incorporando só as novas apresentações
       console.log(`Refinando perfil com ${novasValidas.length} nova(s) apresentação(ões)...`);
       descricao = await refinarPerfilEstilo(perfilAtual.descricao, novasValidas);
     } else {
-      // Primeira vez: gerar do zero
       console.log(`Gerando perfil de estilo com ${novasValidas.length} apresentação(ões)...`);
       descricao = await gerarPerfilEstilo(novasValidas);
     }
 
-    // Acumula o histórico de apresentações analisadas (para rastreamento)
     const apresentacoesAnteriores = perfilAtual?.apresentacoes || [];
     const todasApresentacoes = [...apresentacoesAnteriores, ...novasValidas];
 
     if (perfilAtual) {
-      db.get('perfil').find({ usuarioId: req.usuario.id }).assign({
-        descricao, apresentacoes: todasApresentacoes, atualizadoEm: agora,
-      }).write();
+      await db.updateOne('perfil', { usuarioId: req.usuario.id }, { descricao, apresentacoes: todasApresentacoes, atualizadoEm: agora });
     } else {
-      db.get('perfil').push({
+      await db.insertOne('perfil', {
         usuarioId: req.usuario.id,
         descricao, apresentacoes: todasApresentacoes,
         criadoEm: agora, atualizadoEm: agora,
-      }).write();
+      });
     }
 
     allPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
+    res.json({ descricao, numApresentacoes: todasApresentacoes.length, numReferencias: idsReferencias.length, atualizadoEm: agora });
 
-    res.json({
-      descricao,
-      numApresentacoes: todasApresentacoes.length,
-      numReferencias: idsReferencias.length,
-      atualizadoEm: agora,
-    });
   } catch (err) {
     allPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
     console.error('Erro ao atualizar perfil:', err);
     const raw = err.message || '';
     let mensagem = raw;
     try { const parsed = JSON.parse(raw); mensagem = parsed.error?.message || parsed.message || raw; } catch {}
-    if (raw.includes('credit balance') || raw.includes('billing')) {
+    if (raw.includes('credit balance') || raw.includes('billing'))
       mensagem = 'Créditos da API insuficientes. Acesse console.anthropic.com para recarregar.';
-    }
     res.status(500).json({ erro: mensagem });
   }
 });
 
-// PUT /api/perfil/descricao — edição manual da descrição
+// PUT /api/perfil/descricao
 router.put('/descricao', autenticar, express.json(), async (req, res) => {
   try {
     const { descricao } = req.body;
-    if (!descricao || !descricao.trim()) {
-      return res.status(400).json({ erro: 'Descrição não pode ser vazia' });
-    }
+    if (!descricao || !descricao.trim()) return res.status(400).json({ erro: 'Descrição não pode ser vazia' });
 
-    const perfilAtual = db.get('perfil').find({ usuarioId: req.usuario.id }).value();
+    const perfilAtual = await db.findOne('perfil', { usuarioId: req.usuario.id });
     const agora = new Date().toISOString();
 
     if (perfilAtual) {
-      db.get('perfil').find({ usuarioId: req.usuario.id }).assign({
-        descricao: descricao.trim(),
-        atualizadoEm: agora,
-      }).write();
+      await db.updateOne('perfil', { usuarioId: req.usuario.id }, { descricao: descricao.trim(), atualizadoEm: agora });
     } else {
-      db.get('perfil').push({
-        usuarioId: req.usuario.id,
-        descricao: descricao.trim(),
-        apresentacoes: [],
-        criadoEm: agora,
-        atualizadoEm: agora,
-      }).write();
+      await db.insertOne('perfil', { usuarioId: req.usuario.id, descricao: descricao.trim(), apresentacoes: [], criadoEm: agora, atualizadoEm: agora });
     }
 
     res.json({ descricao: descricao.trim(), atualizadoEm: agora });
@@ -211,9 +179,9 @@ router.put('/descricao', autenticar, express.json(), async (req, res) => {
   }
 });
 
-// DELETE /api/perfil — apaga o perfil
-router.delete('/', autenticar, (req, res) => {
-  db.get('perfil').remove({ usuarioId: req.usuario.id }).write();
+// DELETE /api/perfil
+router.delete('/', autenticar, async (req, res) => {
+  await db.deleteOne('perfil', { usuarioId: req.usuario.id });
   res.json({ ok: true });
 });
 

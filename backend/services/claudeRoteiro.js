@@ -29,8 +29,8 @@ async function withRetry(fn, maxAttempts = 3, baseDelay = 8000) {
   }
 }
 
-function buscarPerfil(usuarioId) {
-  const perfil = db.get('perfil').find({ usuarioId }).value();
+async function buscarPerfil(usuarioId) {
+  const perfil = await db.findOne('perfil', { usuarioId });
   return perfil?.descricao || null;
 }
 
@@ -75,7 +75,7 @@ Responda APENAS com JSON válido, sem texto adicional:
 
 async function gerarRoteiro({ titulos, contextoArquivos, usuarioId }) {
   const temArquivos = !!(contextoArquivos && contextoArquivos.trim());
-  const perfilEstilo = usuarioId ? buscarPerfil(usuarioId) : null;
+  const perfilEstilo = usuarioId ? await buscarPerfil(usuarioId) : null;
 
   const systemPrompt = buildSystemPrompt(temArquivos, perfilEstilo) + FORMAT_JSON;
 
@@ -102,7 +102,7 @@ Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natu
 
 async function regenerarSlide({ titulo, todosTitulos, indice, contextoArquivos, usuarioId }) {
   const temArquivos = !!(contextoArquivos && contextoArquivos.trim());
-  const perfilEstilo = usuarioId ? buscarPerfil(usuarioId) : null;
+  const perfilEstilo = usuarioId ? await buscarPerfil(usuarioId) : null;
 
   const systemPrompt = buildSystemPrompt(temArquivos, perfilEstilo) + FORMAT_JSON;
 

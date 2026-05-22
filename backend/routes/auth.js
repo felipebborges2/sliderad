@@ -13,12 +13,12 @@ router.post('/register', async (req, res) => {
     const { nome, email, senha } = req.body;
     if (!nome || !email || !senha) return res.status(400).json({ erro: 'Campos obrigatórios: nome, email, senha' });
 
-    const existe = db.get('usuarios').find({ email }).value();
+    const existe = await db.findOne('usuarios', { email });
     if (existe) return res.status(409).json({ erro: 'Email já cadastrado' });
 
     const hash = await bcrypt.hash(senha, 10);
     const usuario = { id: uuidv4(), nome, email, senha: hash, criadoEm: new Date().toISOString() };
-    db.get('usuarios').push(usuario).write();
+    await db.insertOne('usuarios', usuario);
 
     const token = jwt.sign({ id: usuario.id, email }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({ token, usuario: { id: usuario.id, nome, email } });
@@ -33,7 +33,7 @@ router.post('/login', async (req, res) => {
     const { email, senha } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Email e senha obrigatórios' });
 
-    const usuario = db.get('usuarios').find({ email }).value();
+    const usuario = await db.findOne('usuarios', { email });
     if (!usuario) return res.status(401).json({ erro: 'Credenciais inválidas' });
 
     const ok = await bcrypt.compare(senha, usuario.senha);
@@ -46,11 +46,10 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Middleware de autenticação (exportado para uso em outras rotas)
+// Middleware de autenticação
 function autenticar(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ erro: 'Token necessário' });
-
   try {
     const payload = jwt.verify(auth.split(' ')[1], JWT_SECRET);
     req.usuario = payload;

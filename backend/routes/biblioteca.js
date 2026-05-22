@@ -15,9 +15,7 @@ const storage = multer.diskStorage({
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
-  filename: (req, file, cb) => {
-    cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
-  }
+  filename: (req, file, cb) => cb(null, `${uuidv4()}${path.extname(file.originalname)}`),
 });
 
 const upload = multer({
@@ -28,19 +26,19 @@ const upload = multer({
     const ext = path.extname(file.originalname).toLowerCase();
     if (permitidos.includes(ext)) cb(null, true);
     else cb(new Error(`Formato não suportado: ${ext}`));
-  }
+  },
 });
 
-// GET /api/biblioteca — list items for user (optionally with content and/or usage data)
-router.get('/', autenticar, (req, res) => {
+// GET /api/biblioteca
+router.get('/', autenticar, async (req, res) => {
   const comConteudo = req.query.comConteudo === 'true';
   const comUso = req.query.comUso === 'true';
-  const itens = db.get('biblioteca').filter({ usuarioId: req.usuario.id }).value();
+  const itens = await db.find('biblioteca', { usuarioId: req.usuario.id });
 
   let usageMap = {};
   if (comUso) {
-    const apresentacoes = db.get('apresentacoes').filter({ usuarioId: req.usuario.id }).value();
-    const roteiros = db.get('roteiros').filter({ usuarioId: req.usuario.id }).value();
+    const apresentacoes = await db.find('apresentacoes', { usuarioId: req.usuario.id });
+    const roteiros = await db.find('roteiros', { usuarioId: req.usuario.id });
 
     itens.forEach(item => {
       const usos = [];
@@ -51,26 +49,17 @@ router.get('/', autenticar, (req, res) => {
       });
       roteiros.forEach(rot => {
         if (Array.isArray(rot.bibliotecaIds) && rot.bibliotecaIds.includes(item.id)) {
-          const titulo = Array.isArray(rot.titulos) && rot.titulos.length > 0
-            ? rot.titulos[0]
-            : 'Roteiro';
+          const titulo = Array.isArray(rot.titulos) && rot.titulos.length > 0 ? rot.titulos[0] : 'Roteiro';
           usos.push({ tipo: 'roteiro', id: rot.id, titulo, criadoEm: rot.criadoEm });
         }
       });
-      // Most recent first
       usos.sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
       usageMap[item.id] = usos;
     });
   }
 
   const resultado = itens.map(item => {
-    const base = {
-      id: item.id,
-      nome: item.nome,
-      tipo: item.tipo,
-      tamanho: item.tamanho,
-      adicionadoEm: item.adicionadoEm,
-    };
+    const base = { id: item.id, nome: item.nome, tipo: item.tipo, tamanho: item.tamanho, adicionadoEm: item.adicionadoEm };
     if (comConteudo) base.conteudo = item.conteudo;
     if (comUso) base.usadoEm = usageMap[item.id] || [];
     return base;
@@ -79,26 +68,23 @@ router.get('/', autenticar, (req, res) => {
   res.json({ itens: resultado });
 });
 
-// GET /api/biblioteca/:id/conteudo — get full content of one item
-router.get('/:id/conteudo', autenticar, (req, res) => {
-  const item = db.get('biblioteca').find({ id: req.params.id, usuarioId: req.usuario.id }).value();
+// GET /api/biblioteca/:id/conteudo
+router.get('/:id/conteudo', autenticar, async (req, res) => {
+  const item = await db.findOne('biblioteca', { id: req.params.id, usuarioId: req.usuario.id });
   if (!item) return res.status(404).json({ erro: 'Item não encontrado' });
   res.json({ conteudo: item.conteudo });
 });
 
-// POST /api/biblioteca/adicionar — upload and save files
+// POST /api/biblioteca/adicionar
 router.post('/adicionar', autenticar, upload.array('arquivos', 20), async (req, res) => {
   const arquivosUpload = req.files || [];
   const arquivosPaths = arquivosUpload.map(f => f.path);
 
-  if (arquivosUpload.length === 0) {
-    return res.status(400).json({ erro: 'Nenhum arquivo enviado' });
-  }
+  if (arquivosUpload.length === 0) return res.status(400).json({ erro: 'Nenhum arquivo enviado' });
 
   try {
     const extraidos = await Promise.all(arquivosUpload.map(f => extractFileContent(f.path)));
-
-    const itensSalvos = extraidos.map((ext, i) => {
+    const itensSalvos = await Promise.all(extraidos.map(async (ext, i) => {
       const f = arquivosUpload[i];
       const item = {
         id: uuidv4(),
@@ -107,60 +93,47 @@ router.post('/adicionar', autenticar, upload.array('arquivos', 20), async (req, 
         tipo: path.extname(f.originalname).replace('.', '').toLowerCase(),
         conteudo: ext.content || '',
         tamanho: f.size,
-        adicionadoEm: new Date().toISOString()
+        adicionadoEm: new Date().toISOString(),
       };
-      db.get('biblioteca').push(item).write();
+      await db.insertOne('biblioteca', item);
       return item;
-    });
-
-    // Limpar uploads temporários
-    arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
-
-    // Return items without conteudo
-    const resposta = itensSalvos.map(({ id, nome, tipo, tamanho, adicionadoEm }) => ({
-      id, nome, tipo, tamanho, adicionadoEm
     }));
 
+    arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
+    const resposta = itensSalvos.map(({ id, nome, tipo, tamanho, adicionadoEm }) => ({ id, nome, tipo, tamanho, adicionadoEm }));
     res.json({ itens: resposta });
   } catch (err) {
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
-    console.error('Erro ao adicionar à biblioteca:', err);
     res.status(500).json({ erro: err.message || 'Erro ao processar arquivos' });
   }
 });
 
-// POST /api/biblioteca/vincular — manually link/unlink a biblioteca item to an aula
-router.post('/vincular', autenticar, (req, res) => {
+// POST /api/biblioteca/vincular
+router.post('/vincular', autenticar, async (req, res) => {
   const { itemId, aulaId, aulaType, vincular } = req.body;
-  if (!itemId || !aulaId || !aulaType || vincular == null) {
+  if (!itemId || !aulaId || !aulaType || vincular == null)
     return res.status(400).json({ erro: 'itemId, aulaId, aulaType e vincular são obrigatórios' });
-  }
 
-  const item = db.get('biblioteca').find({ id: itemId, usuarioId: req.usuario.id }).value();
+  const item = await db.findOne('biblioteca', { id: itemId, usuarioId: req.usuario.id });
   if (!item) return res.status(404).json({ erro: 'Item de biblioteca não encontrado' });
 
   const collection = aulaType === 'apresentacao' ? 'apresentacoes' : 'roteiros';
-  const aula = db.get(collection).find({ id: aulaId, usuarioId: req.usuario.id }).value();
+  const aula = await db.findOne(collection, { id: aulaId, usuarioId: req.usuario.id });
   if (!aula) return res.status(404).json({ erro: 'Aula não encontrada' });
 
   const ids = Array.isArray(aula.bibliotecaIds) ? [...aula.bibliotecaIds] : [];
-  if (vincular) {
-    if (!ids.includes(itemId)) ids.push(itemId);
-  } else {
-    const idx = ids.indexOf(itemId);
-    if (idx > -1) ids.splice(idx, 1);
-  }
+  if (vincular) { if (!ids.includes(itemId)) ids.push(itemId); }
+  else { const idx = ids.indexOf(itemId); if (idx > -1) ids.splice(idx, 1); }
 
-  db.get(collection).find({ id: aulaId }).assign({ bibliotecaIds: ids }).write();
+  await db.updateOne(collection, { id: aulaId }, { bibliotecaIds: ids });
   res.json({ ok: true });
 });
 
 // DELETE /api/biblioteca/:id
-router.delete('/:id', autenticar, (req, res) => {
-  const item = db.get('biblioteca').find({ id: req.params.id, usuarioId: req.usuario.id }).value();
+router.delete('/:id', autenticar, async (req, res) => {
+  const item = await db.findOne('biblioteca', { id: req.params.id, usuarioId: req.usuario.id });
   if (!item) return res.status(404).json({ erro: 'Item não encontrado' });
-
-  db.get('biblioteca').remove({ id: req.params.id, usuarioId: req.usuario.id }).write();
+  await db.deleteOne('biblioteca', { id: req.params.id, usuarioId: req.usuario.id });
   res.json({ ok: true });
 });
 
