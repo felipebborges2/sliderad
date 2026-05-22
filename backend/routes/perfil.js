@@ -89,9 +89,24 @@ router.post('/adicionar', autenticar, upload.fields([
     }
 
     // 3. Criar registros históricos para as apresentações (fonte: 'perfil')
-    //    para que os vínculos apareçam no badge da biblioteca
+    //    usando o mapeamento individual links[refIdx] = [aulaIdx, ...]
     if (idsReferencias.length > 0) {
-      filesApresentacoes.forEach(f => {
+      let links = [];
+      try { links = JSON.parse(req.body.links || '[]'); } catch {}
+
+      // Para cada aula, coleta quais IDs de referência estão vinculados a ela
+      const refIdsPorAula = filesApresentacoes.map(() => []);
+      idsReferencias.forEach((refId, refIdx) => {
+        const aulaIndices = Array.isArray(links[refIdx]) ? links[refIdx] : [];
+        aulaIndices.forEach(aulaIdx => {
+          if (aulaIdx >= 0 && aulaIdx < filesApresentacoes.length) {
+            refIdsPorAula[aulaIdx].push(refId);
+          }
+        });
+      });
+
+      filesApresentacoes.forEach((f, i) => {
+        if (refIdsPorAula[i].length === 0) return; // sem referências vinculadas, sem registro
         const titulo = path.basename(f.originalname, path.extname(f.originalname));
         db.get('apresentacoes').push({
           id: uuidv4(),
@@ -102,7 +117,7 @@ router.post('/adicionar', autenticar, upload.fields([
           numSlides: 0,
           numArquivos: 1,
           arquivos: [{ nome: f.originalname, tipo: path.extname(f.originalname) }],
-          bibliotecaIds: idsReferencias,
+          bibliotecaIds: refIdsPorAula[i],
           criadoEm: agora,
         }).write();
       });

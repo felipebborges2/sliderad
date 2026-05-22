@@ -442,6 +442,8 @@ export default function PerfilPage() {
   const [refreshBiblioteca, setRefreshBiblioteca] = useState(0);
   const inputRef = useRef();
   const inputRefRef = useRef();
+  const counterRef = useRef(0);
+  const nextId = () => String(++counterRef.current);
 
   useEffect(() => {
     api.get('/api/perfil').then(r => {
@@ -449,15 +451,20 @@ export default function PerfilPage() {
     }).catch(() => {}).finally(() => setCarregando(false));
   }, []);
 
+  // arquivos = [{ id, file }]  referencias = [{ id, file, aulaIds: Set<id> }]
   const addArquivos = useCallback(files => {
     const novos = Array.from(files).filter(f => {
       const ext = f.name.split('.').pop().toLowerCase();
       return FORMATOS.includes(ext) && f.size <= MAX_MB * 1024 * 1024;
     });
     setArquivos(prev => {
-      const existentes = new Set(prev.map(a => a.name + a.size));
-      return [...prev, ...novos.filter(f => !existentes.has(f.name + f.size))];
+      const existentes = new Set(prev.map(a => a.file.name + a.file.size));
+      return [...prev, ...novos
+        .filter(f => !existentes.has(f.name + f.size))
+        .map(f => ({ id: nextId(), file: f }))
+      ];
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addReferencias = useCallback(files => {
@@ -466,13 +473,39 @@ export default function PerfilPage() {
       return FORMATOS_REF.includes(ext) && f.size <= MAX_MB * 1024 * 1024;
     });
     setReferencias(prev => {
-      const existentes = new Set(prev.map(a => a.name + a.size));
-      return [...prev, ...novos.filter(f => !existentes.has(f.name + f.size))];
+      const existentes = new Set(prev.map(r => r.file.name + r.file.size));
+      return [...prev, ...novos
+        .filter(f => !existentes.has(f.name + f.size))
+        .map(f => ({ id: nextId(), file: f, aulaIds: new Set() }))
+      ];
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const removerArquivo = i => setArquivos(prev => prev.filter((_, idx) => idx !== i));
+  const removerArquivo = i => {
+    const aulaId = arquivos[i]?.id;
+    setArquivos(prev => prev.filter((_, idx) => idx !== i));
+    if (aulaId) {
+      setReferencias(prev => prev.map(ref => {
+        if (!ref.aulaIds.has(aulaId)) return ref;
+        const next = new Set(ref.aulaIds);
+        next.delete(aulaId);
+        return { ...ref, aulaIds: next };
+      }));
+    }
+  };
+
   const removerReferencia = i => setReferencias(prev => prev.filter((_, idx) => idx !== i));
+
+  const toggleRefAula = (refId, aulaId) => {
+    setReferencias(prev => prev.map(ref => {
+      if (ref.id !== refId) return ref;
+      const next = new Set(ref.aulaIds);
+      if (next.has(aulaId)) next.delete(aulaId);
+      else next.add(aulaId);
+      return { ...ref, aulaIds: next };
+    }));
+  };
 
   const onDrop = e => {
     e.preventDefault();
@@ -506,8 +539,16 @@ export default function PerfilPage() {
 
     try {
       const form = new FormData();
-      arquivos.forEach(f => form.append('apresentacoes', f));
-      referencias.forEach(f => form.append('referencias', f));
+      arquivos.forEach(a => form.append('apresentacoes', a.file));
+      referencias.forEach(r => form.append('referencias', r.file));
+
+      // links[refIndex] = [aulaIndex, ...] — mapeamento individual de cada referência
+      const links = referencias.map(ref =>
+        Array.from(ref.aulaIds)
+          .map(aulaId => arquivos.findIndex(a => a.id === aulaId))
+          .filter(idx => idx !== -1)
+      );
+      form.append('links', JSON.stringify(links));
 
       const resp = await api.post('/api/perfil/adicionar', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -547,7 +588,7 @@ export default function PerfilPage() {
   };
 
   const formatarTamanho = b => b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`;
-  const tamanhoTotal = arquivos.reduce((s, f) => s + f.size, 0);
+  const tamanhoTotal = arquivos.reduce((s, a) => s + a.file.size, 0);
 
   if (carregando) return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--muted)', fontSize: 14, padding: '40px 0' }}>
@@ -596,12 +637,12 @@ export default function PerfilPage() {
                   <span>{arquivos.length} arquivo{arquivos.length > 1 ? 's' : ''} selecionado{arquivos.length > 1 ? 's' : ''}</span>
                   <span style={{ color: 'var(--muted)' }}>{formatarTamanho(tamanhoTotal)}</span>
                 </div>
-                {arquivos.map((f, i) => (
-                  <div key={i} style={pf.arquivoItem}>
+                {arquivos.map((a, i) => (
+                  <div key={a.id} style={pf.arquivoItem}>
                     <span style={{ fontSize: 16 }}>📊</span>
                     <div style={pf.arquivoInfo}>
-                      <div style={pf.arquivoNome}>{f.name}</div>
-                      <div style={pf.arquivoSize}>{formatarTamanho(f.size)}</div>
+                      <div style={pf.arquivoNome}>{a.file.name}</div>
+                      <div style={pf.arquivoSize}>{formatarTamanho(a.file.size)}</div>
                     </div>
                     <button onClick={() => removerArquivo(i)} style={pf.btnRemover} disabled={analisando}>✕</button>
                   </div>
@@ -616,8 +657,7 @@ export default function PerfilPage() {
                 <span style={pf.refLabelOpt}>opcional</span>
               </div>
               <div style={pf.refHint}>
-                Artigos, guidelines ou materiais que você usou para preparar essas aulas.
-                Serão salvos na biblioteca e vinculados automaticamente.
+                Adicione artigos ou guidelines. Para cada referência, selecione em quais aulas ela foi usada.
               </div>
               <div
                 style={{ ...pf.refDropzone, ...(draggingRef ? pf.dropzoneActive : {}) }}
@@ -639,16 +679,43 @@ export default function PerfilPage() {
                   Arraste ou clique · PDF · PPTX · DOCX · TXT
                 </span>
               </div>
+
               {referencias.length > 0 && (
-                <div style={pf.listaArquivos}>
-                  {referencias.map((f, i) => (
-                    <div key={i} style={pf.arquivoItem}>
-                      <span style={{ fontSize: 14 }}>📎</span>
-                      <div style={pf.arquivoInfo}>
-                        <div style={pf.arquivoNome}>{f.name}</div>
-                        <div style={pf.arquivoSize}>{formatarTamanho(f.size)}</div>
+                <div style={pf.refLista}>
+                  {referencias.map((ref, i) => (
+                    <div key={ref.id} style={pf.refItem}>
+                      {/* Cabeçalho da referência */}
+                      <div style={pf.refItemHeader}>
+                        <span style={{ fontSize: 14, flexShrink: 0 }}>📄</span>
+                        <div style={pf.arquivoInfo}>
+                          <div style={pf.arquivoNome}>{ref.file.name}</div>
+                          <div style={pf.arquivoSize}>{formatarTamanho(ref.file.size)}</div>
+                        </div>
+                        <button onClick={() => removerReferencia(i)} style={pf.btnRemover} disabled={analisando}>✕</button>
                       </div>
-                      <button onClick={() => removerReferencia(i)} style={pf.btnRemover} disabled={analisando}>✕</button>
+
+                      {/* Seletor de aulas */}
+                      <div style={pf.refAulaSelector}>
+                        <div style={pf.refAulaLabel}>Vincular a:</div>
+                        {arquivos.length === 0 ? (
+                          <div style={pf.refAulaSemAulas}>Adicione aulas acima para vincular</div>
+                        ) : (
+                          <div style={pf.refAulaLista}>
+                            {arquivos.map(a => (
+                              <label key={a.id} style={pf.refAulaCheckLabel}>
+                                <input
+                                  type="checkbox"
+                                  checked={ref.aulaIds.has(a.id)}
+                                  onChange={() => toggleRefAula(ref.id, a.id)}
+                                  disabled={analisando}
+                                  style={{ accentColor: 'var(--cyan)', flexShrink: 0 }}
+                                />
+                                <span style={pf.refAulaNome}>{a.file.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -797,6 +864,40 @@ const pf = {
     display: 'flex', alignItems: 'center', gap: 10,
     border: '1px dashed var(--border)', borderRadius: 8,
     padding: '10px 14px', cursor: 'pointer', transition: 'all 0.2s',
+  },
+  refLista: { display: 'flex', flexDirection: 'column', gap: 8 },
+  refItem: {
+    background: 'var(--navy2)', border: '1px solid var(--border)',
+    borderRadius: 8, overflow: 'hidden',
+  },
+  refItemHeader: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '8px 10px',
+  },
+  refAulaSelector: {
+    borderTop: '1px solid var(--border)',
+    padding: '8px 12px 10px',
+  },
+  refAulaLabel: {
+    fontSize: 10, fontWeight: 600, color: 'var(--cyan)',
+    textTransform: 'uppercase', letterSpacing: '0.06em',
+    marginBottom: 6,
+  },
+  refAulaSemAulas: {
+    fontSize: 11, color: 'var(--muted)', fontStyle: 'italic',
+  },
+  refAulaLista: {
+    display: 'flex', flexDirection: 'column', gap: 5,
+    maxHeight: 140, overflowY: 'auto',
+  },
+  refAulaCheckLabel: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    fontSize: 12, color: 'var(--white-dim)',
+    padding: '3px 4px', borderRadius: 5, cursor: 'pointer',
+  },
+  refAulaNome: {
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    flex: 1,
   },
 
   btnAnalisar: { padding: '14px', background: 'linear-gradient(135deg, var(--blue) 0%, #0d4f8c 100%)', color: 'var(--white)', fontSize: 14, borderRadius: 10, boxShadow: '0 6px 24px rgba(26,110,181,0.4)', letterSpacing: '0.02em' },
