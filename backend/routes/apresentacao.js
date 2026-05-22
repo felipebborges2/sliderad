@@ -138,30 +138,23 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       titulos: titulos && titulos.length > 0 ? titulos : undefined
     });
 
-    // 3. Gerar PPTX
-    const outputDir = path.join(__dirname, '..', 'outputs');
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
+    // 3. Salvar no histórico (slides incluídos para download futuro sem depender do disco)
     const id = uuidv4();
-    const outputPath = path.join(outputDir, `${id}.pptx`);
-    await gerarPPTX({ conteudo, outputPath });
-
-    // 4. Salvar no histórico
     const registro = {
       id,
       usuarioId: req.usuario.id,
       tema: tema.trim(),
       titulo: conteudo.titulo || tema.trim(),
+      slides: conteudo.slides || [],
       numSlides: conteudo.slides ? conteudo.slides.length : 0,
       numArquivos: arquivosUpload.length,
       arquivos: arquivosUpload.map(f => ({ nome: f.originalname, tipo: path.extname(f.originalname) })),
       bibliotecaIds,
       criadoEm: new Date().toISOString(),
-      outputFile: `${id}.pptx`
     };
     await db.insertOne('apresentacoes', registro);
 
-    // 5. Limpar uploads e responder com JSON para preview
+    // 4. Limpar uploads e responder com JSON para preview
     arquivosPaths.forEach(p => { try { fs.unlinkSync(p); } catch {} });
 
     res.json({
@@ -187,9 +180,14 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
 // POST /api/apresentacao/exportar — re-generate PPTX from edited slides
 router.post('/exportar', autenticar, async (req, res) => {
   try {
-    const { slides, titulo } = req.body;
+    const { slides, titulo, id } = req.body;
     if (!slides || !Array.isArray(slides) || slides.length === 0) {
       return res.status(400).json({ erro: 'slides é obrigatório' });
+    }
+
+    // Persistir slides editados no MongoDB para que /download/:id sempre retorne a versão mais recente
+    if (id) {
+      await db.updateOne('apresentacoes', { id, usuarioId: req.usuario.id }, { slides, titulo: titulo || undefined });
     }
 
     const conteudo = { slides, titulo: titulo || 'Apresentação' };
@@ -220,18 +218,36 @@ router.post('/exportar', autenticar, async (req, res) => {
   }
 });
 
-// GET /api/apresentacao/download/:id
+// GET /api/apresentacao/download/:id — regera PPTX on-the-fly a partir dos slides no MongoDB
 router.get('/download/:id', autenticar, async (req, res) => {
-  const { id } = req.params;
-  const registro = await db.findOne('apresentacoes', { id, usuarioId: req.usuario.id });
-  if (!registro) return res.status(404).json({ erro: 'Apresentação não encontrada' });
+  try {
+    const { id } = req.params;
+    const registro = await db.findOne('apresentacoes', { id, usuarioId: req.usuario.id });
+    if (!registro) return res.status(404).json({ erro: 'Apresentação não encontrada' });
+    if (!registro.slides || registro.slides.length === 0)
+      return res.status(404).json({ erro: 'Slides não disponíveis para download' });
 
-  const filePath = path.join(__dirname, '..', 'outputs', registro.outputFile);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ erro: 'Arquivo não encontrado' });
+    const outputDir = path.join(__dirname, '..', 'outputs');
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(registro.tema)}.pptx"`);
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-  fs.createReadStream(filePath).pipe(res);
+    const tmpPath = path.join(outputDir, `${uuidv4()}.pptx`);
+    await gerarPPTX({ conteudo: { slides: registro.slides, titulo: registro.titulo }, outputPath: tmpPath });
+
+    const nomeArquivo = `${registro.titulo || registro.tema || 'apresentacao'}.pptx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(nomeArquivo)}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+
+    const stream = fs.createReadStream(tmpPath);
+    stream.pipe(res);
+    stream.on('end', () => { try { fs.unlinkSync(tmpPath); } catch {} });
+    stream.on('error', () => {
+      try { fs.unlinkSync(tmpPath); } catch {}
+      if (!res.headersSent) res.status(500).json({ erro: 'Erro ao enviar arquivo' });
+    });
+  } catch (err) {
+    console.error('Erro ao fazer download:', err);
+    res.status(500).json({ erro: extrairMensagemErro(err) });
+  }
 });
 
 module.exports = router;
