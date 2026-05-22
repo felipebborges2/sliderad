@@ -53,7 +53,7 @@ Gere a lista de títulos para uma apresentação completa sobre este tema.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 600, // ~25 títulos em JSON ≈ 300 tokens; 600 é margem generosa
+    max_tokens: 1200, // títulos médicos em PT-BR são longos; 1200 garante margem segura
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
   });
