@@ -5,7 +5,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { autenticar } = require('./auth');
 const { extractFileContent } = require('../services/extractor');
-const { gerarPerfilEstilo } = require('../services/claudePerfil');
+const { gerarPerfilEstilo, refinarPerfilEstilo } = require('../services/claudePerfil');
 const db = require('../services/db');
 
 const router = express.Router();
@@ -123,18 +123,28 @@ router.post('/adicionar', autenticar, upload.fields([
       });
     }
 
-    // 4. Mesclar com apresentações anteriores do perfil e gerar estilo
+    // 4. Gerar/refinar estilo
     const perfilAtual = db.get('perfil').find({ usuarioId: req.usuario.id }).value();
-    const apresentacoesAnteriores = perfilAtual?.apresentacoes || [];
-    const todasApresentacoes = [...apresentacoesAnteriores, ...novasExtraidas]
-      .filter(a => a.conteudo && a.conteudo.trim());
+    const novasValidas = novasExtraidas.filter(a => a.conteudo && a.conteudo.trim());
 
-    if (todasApresentacoes.length === 0) {
+    if (novasValidas.length === 0) {
       return res.status(400).json({ erro: 'Não foi possível extrair conteúdo dos arquivos enviados' });
     }
 
-    console.log(`Gerando perfil de estilo com ${todasApresentacoes.length} apresentação(ões)...`);
-    const descricao = await gerarPerfilEstilo(todasApresentacoes);
+    let descricao;
+    if (perfilAtual?.descricao) {
+      // Já existe perfil: refinar incorporando só as novas apresentações
+      console.log(`Refinando perfil com ${novasValidas.length} nova(s) apresentação(ões)...`);
+      descricao = await refinarPerfilEstilo(perfilAtual.descricao, novasValidas);
+    } else {
+      // Primeira vez: gerar do zero
+      console.log(`Gerando perfil de estilo com ${novasValidas.length} apresentação(ões)...`);
+      descricao = await gerarPerfilEstilo(novasValidas);
+    }
+
+    // Acumula o histórico de apresentações analisadas (para rastreamento)
+    const apresentacoesAnteriores = perfilAtual?.apresentacoes || [];
+    const todasApresentacoes = [...apresentacoesAnteriores, ...novasValidas];
 
     if (perfilAtual) {
       db.get('perfil').find({ usuarioId: req.usuario.id }).assign({

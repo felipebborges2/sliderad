@@ -6,8 +6,9 @@ const router = express.Router();
 
 // GET /api/historico
 router.get('/', autenticar, (req, res) => {
+  const incluirPerfil = req.query.incluirPerfil === 'true';
   const apresentacoes = db.get('apresentacoes')
-    .filter(ap => ap.usuarioId === req.usuario.id && ap.fonte !== 'perfil')
+    .filter(ap => ap.usuarioId === req.usuario.id && (incluirPerfil || ap.fonte !== 'perfil'))
     .orderBy('criadoEm', 'desc')
     .value();
   res.json(apresentacoes);

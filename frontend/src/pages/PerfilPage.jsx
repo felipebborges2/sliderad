@@ -37,7 +37,7 @@ function BibliotecaSection() {
     setAulasCarregando(true);
     try {
       const [histResp, rotResp] = await Promise.all([
-        api.get('/api/historico'),
+        api.get('/api/historico?incluirPerfil=true'),
         api.get('/api/roteiro/lista'),
       ]);
       setAulasDisponiveis({
@@ -193,7 +193,7 @@ function BibliotecaSection() {
                 <div style={bib.aulaLista}>
                   {aulasDisponiveis.apresentacoes.length > 0 && (
                     <>
-                      <div style={bib.aulaGrupoLabel}>⬡ Apresentações PPTX</div>
+                      <div style={bib.aulaGrupoLabel}>⬡ Apresentações</div>
                       {aulasDisponiveis.apresentacoes.map(ap => {
                         const linked = (itens.find(i => i.id === vincularAberto)?.usadoEm || [])
                           .some(u => u.tipo === 'apresentacao' && u.id === ap.id);
@@ -209,7 +209,9 @@ function BibliotecaSection() {
                             />
                             <div style={bib.aulaInfo}>
                               <span style={bib.aulaTitulo}>{ap.titulo || ap.tema}</span>
-                              <span style={bib.aulaData}>{formatarDataBib(ap.criadoEm)}</span>
+                              <span style={bib.aulaData}>
+                                {ap.fonte === 'perfil' ? 'Aula do perfil · ' : ''}{formatarDataBib(ap.criadoEm)}
+                              </span>
                             </div>
                           </label>
                         );
@@ -464,7 +466,6 @@ export default function PerfilPage() {
         .map(f => ({ id: nextId(), file: f }))
       ];
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addReferencias = useCallback(files => {
@@ -479,7 +480,6 @@ export default function PerfilPage() {
         .map(f => ({ id: nextId(), file: f, aulaIds: new Set() }))
       ];
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const removerArquivo = i => {
