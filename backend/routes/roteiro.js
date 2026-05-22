@@ -82,15 +82,19 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       arquivosExtraidos = await Promise.all(arquivosUpload.map(f => extractFileContent(f.path)));
     }
 
+    // Limite por arquivo: 20k chars (~5k tokens) — suficiente para geração detalhada
+    const LIMITE_ARQ = 20000;
+    const trimCtx = (t) => t && t.length > LIMITE_ARQ ? t.slice(0, LIMITE_ARQ) + '\n[...]' : t;
+
     let contextoArquivos = arquivosExtraidos
       .filter(a => a.content && a.content.trim())
-      .map(a => `=== ${a.filename} ===\n${a.content}`)
+      .map(a => `=== ${a.filename} ===\n${trimCtx(a.content)}`)
       .join('\n\n');
 
-    // Prepend biblioteca context if provided
+    // Prepend biblioteca context if provided (também com limite)
     const bibliotecaContexto = req.body.bibliotecaContexto || '';
     if (bibliotecaContexto.trim()) {
-      contextoArquivos = `=== BIBLIOTECA DE REFERÊNCIAS ===\n${bibliotecaContexto}\n\n${contextoArquivos}`;
+      contextoArquivos = `=== BIBLIOTECA DE REFERÊNCIAS ===\n${trimCtx(bibliotecaContexto)}\n\n${contextoArquivos}`;
     }
 
     // Gerar conteúdo com Claude

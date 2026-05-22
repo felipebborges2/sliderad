@@ -3,6 +3,14 @@ const db = require('./db');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Limite de contexto para regeneração de slide único (~2k tokens)
+const LIMITE_REGENERAR = 8000;
+
+function trim(text, max) {
+  if (!text || text.length <= max) return text;
+  return text.slice(0, max) + '\n[...]';
+}
+
 function buscarPerfil(usuarioId) {
   const perfil = db.get('perfil').find({ usuarioId }).value();
   return perfil?.descricao || null;
@@ -63,7 +71,7 @@ Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natu
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 12000,
+    max_tokens: 8000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });
@@ -90,13 +98,13 @@ SLIDE A REGENERAR:
 OUTROS SLIDES DA APRESENTAÇÃO (contexto):
 ${outrosTitulos}
 
-${temArquivos ? `ARQUIVOS DE REFERÊNCIA:\n${contextoArquivos}` : 'Sem arquivos de referência.'}
+${temArquivos ? `ARQUIVOS DE REFERÊNCIA:\n${trim(contextoArquivos, LIMITE_REGENERAR)}` : 'Sem arquivos de referência.'}
 
 Retorne um JSON com array "slides" contendo apenas este único slide.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 3000,
+    max_tokens: 1500, // um slide não precisa de mais que isso
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });

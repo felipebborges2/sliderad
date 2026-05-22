@@ -2,6 +2,14 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Para análise de estilo, 15k chars por apresentação é mais que suficiente (~3.75k tokens)
+const LIMITE_PERFIL = 15000;
+
+function trim(text, max) {
+  if (!text || text.length <= max) return text;
+  return text.slice(0, max) + '\n[...]';
+}
+
 const SYSTEM_BASE = `Você é um especialista em análise de estilo de apresentações médicas.
 Este perfil será usado por uma IA para gerar futuras apresentações no mesmo estilo — deve ser específico, claro e acionável.
 Escreva em parágrafo corrido (sem tópicos ou listas). Entre 250 e 400 palavras. Em português.`;
@@ -10,7 +18,7 @@ Escreva em parágrafo corrido (sem tópicos ou listas). Entre 250 e 400 palavras
 async function gerarPerfilEstilo(apresentacoes) {
   const textoApresentacoes = apresentacoes
     .filter(a => a.conteudo && a.conteudo.trim())
-    .map((a, i) => `=== APRESENTAÇÃO ${i + 1}: ${a.nome} ===\n${a.conteudo}`)
+    .map((a, i) => `=== APRESENTAÇÃO ${i + 1}: ${a.nome} ===\n${trim(a.conteudo, LIMITE_PERFIL)}`)
     .join('\n\n');
 
   if (!textoApresentacoes.trim()) {
@@ -24,7 +32,7 @@ estrutura típica (seções, ordem, abertura e fechamento), abordagem de conteú
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
+    max_tokens: 1200, // 400 palavras ≈ 530 tokens; 1200 é margem segura
     system: systemPrompt,
     messages: [{
       role: 'user',
@@ -39,7 +47,7 @@ estrutura típica (seções, ordem, abertura e fechamento), abordagem de conteú
 async function refinarPerfilEstilo(perfilAtual, novasApresentacoes) {
   const textoNovas = novasApresentacoes
     .filter(a => a.conteudo && a.conteudo.trim())
-    .map((a, i) => `=== NOVA APRESENTAÇÃO ${i + 1}: ${a.nome} ===\n${a.conteudo}`)
+    .map((a, i) => `=== NOVA APRESENTAÇÃO ${i + 1}: ${a.nome} ===\n${trim(a.conteudo, LIMITE_PERFIL)}`)
     .join('\n\n');
 
   if (!textoNovas.trim()) {
@@ -56,7 +64,7 @@ Não comece do zero — construa sobre o que já existe.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
+    max_tokens: 1200,
     system: systemPrompt,
     messages: [{
       role: 'user',

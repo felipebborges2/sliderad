@@ -3,6 +3,15 @@ const db = require('./db');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Limites de conteúdo por tipo de chamada (chars → tokens ÷ 4)
+const LIMITE_ESTRUTURA   =  4000; // ~1k tokens por arquivo — só precisa entender tópicos
+const LIMITE_CONTEUDO    = 25000; // ~6.25k tokens por arquivo — geração detalhada
+
+function trim(text, max) {
+  if (!text || text.length <= max) return text;
+  return text.slice(0, max) + '\n[...]';
+}
+
 function buscarPerfil(usuarioId) {
   const perfil = db.get('perfil').find({ usuarioId }).value();
   return perfil?.descricao || null;
@@ -12,7 +21,7 @@ async function sugerirEstrutura({ tema, arquivos, usuarioId }) {
   // Monta contexto dos arquivos de referência
   const contextoArquivos = arquivos
     .filter(a => a.content && a.content.trim())
-    .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${a.content}`)
+    .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${trim(a.content, LIMITE_ESTRUTURA)}`)
     .join('\n\n');
 
   const temArquivos = contextoArquivos.length > 0;
@@ -44,7 +53,7 @@ Gere a lista de títulos para uma apresentação completa sobre este tema.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 2000,
+    max_tokens: 600, // ~25 títulos em JSON ≈ 300 tokens; 600 é margem generosa
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
   });
@@ -65,7 +74,7 @@ async function gerarConteudoApresentacao({ tema, arquivos, usuarioId, titulos })
   // Monta contexto dos arquivos de referência
   const contextoArquivos = arquivos
     .filter(a => a.content && a.content.trim())
-    .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${a.content}`)
+    .map(a => `=== ARQUIVO: ${a.filename} (${a.type.toUpperCase()}) ===\n${trim(a.content, LIMITE_CONTEUDO)}`)
     .join('\n\n');
 
   const temArquivos = contextoArquivos.length > 0;
