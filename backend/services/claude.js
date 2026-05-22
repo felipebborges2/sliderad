@@ -5,7 +5,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Limites de conteúdo por tipo de chamada (chars → tokens ÷ 4)
 const LIMITE_ESTRUTURA   =  4000; // ~1k tokens por arquivo — só precisa entender tópicos
-const LIMITE_CONTEUDO    = 25000; // ~6.25k tokens por arquivo — geração detalhada
+const LIMITE_CONTEUDO    = 60000; // ~15k tokens por arquivo — arquivos longos de referência
 
 function trim(text, max) {
   if (!text || text.length <= max) return text;

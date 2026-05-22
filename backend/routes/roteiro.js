@@ -82,8 +82,8 @@ router.post('/gerar', autenticar, upload.array('arquivos', 10), async (req, res)
       arquivosExtraidos = await Promise.all(arquivosUpload.map(f => extractFileContent(f.path)));
     }
 
-    // Limite por arquivo: 20k chars (~5k tokens) — suficiente para geração detalhada
-    const LIMITE_ARQ = 20000;
+    // Limite por arquivo: 60k chars (~15k tokens) — arquivos longos de referência
+    const LIMITE_ARQ = 60000;
     const trimCtx = (t) => t && t.length > LIMITE_ARQ ? t.slice(0, LIMITE_ARQ) + '\n[...]' : t;
 
     let contextoArquivos = arquivosExtraidos
