@@ -12,6 +12,25 @@ function trim(text, max) {
   return text.slice(0, max) + '\n[...]';
 }
 
+// Retry com backoff exponencial para erros de overload da Anthropic
+async function withRetry(fn, maxAttempts = 3, baseDelay = 8000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const overloaded = err.status === 529 || err.status === 503 ||
+        (err.message || '').toLowerCase().includes('overload');
+      if (overloaded && attempt < maxAttempts) {
+        const delay = baseDelay * attempt;
+        console.log(`Anthropic overloaded — aguardando ${delay}ms antes da tentativa ${attempt + 1}/${maxAttempts}...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 function buscarPerfil(usuarioId) {
   const perfil = db.get('perfil').find({ usuarioId }).value();
   return perfil?.descricao || null;
@@ -172,19 +191,19 @@ ${temArquivos ? `ARQUIVOS DE REFERÊNCIA FORNECIDOS:\n${contextoArquivos}` : 'Ne
 
 Gere uma apresentação completa, técnica e didática sobre este tema para uma residente de radioterapia apresentar para sua equipe.`;
 
-  const stream = client.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 32000,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }]
+  const texto = await withRetry(async () => {
+    const stream = client.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 32000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    });
+    return (await stream.finalText()).trim();
   });
-
-  const texto = (await stream.finalText()).trim();
 
   // Parse do JSON
   let dados;
   try {
-    // Remove possíveis blocos de código
     const limpo = texto.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
     dados = JSON.parse(limpo);
   } catch (err) {

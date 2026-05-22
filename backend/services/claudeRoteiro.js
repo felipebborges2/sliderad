@@ -11,6 +11,24 @@ function trim(text, max) {
   return text.slice(0, max) + '\n[...]';
 }
 
+async function withRetry(fn, maxAttempts = 3, baseDelay = 8000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const overloaded = err.status === 529 || err.status === 503 ||
+        (err.message || '').toLowerCase().includes('overload');
+      if (overloaded && attempt < maxAttempts) {
+        const delay = baseDelay * attempt;
+        console.log(`Anthropic overloaded — aguardando ${delay}ms antes da tentativa ${attempt + 1}/${maxAttempts}...`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 function buscarPerfil(usuarioId) {
   const perfil = db.get('perfil').find({ usuarioId }).value();
   return perfil?.descricao || null;
@@ -69,14 +87,17 @@ ${temArquivos ? `ARQUIVOS DE REFERÊNCIA:\n${contextoArquivos}` : 'Sem arquivos 
 
 Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natureza do conteúdo. Seja completo e técnico.`;
 
-  const stream = client.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 32000,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
+  const texto = await withRetry(async () => {
+    const stream = client.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 32000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+    return stream.finalText();
   });
 
-  return parseJSON(await stream.finalText());
+  return parseJSON(texto);
 }
 
 async function regenerarSlide({ titulo, todosTitulos, indice, contextoArquivos, usuarioId }) {

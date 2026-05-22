@@ -21,6 +21,9 @@ function extrairMensagemErro(err) {
   if (raw.includes('credit balance') || raw.includes('billing')) {
     return 'Créditos da API insuficientes. Acesse console.anthropic.com para recarregar.';
   }
+  if (raw.toLowerCase().includes('overload')) {
+    return 'A API está sobrecarregada no momento. Tente novamente em alguns segundos.';
+  }
   return raw || 'Erro ao processar a solicitação.';
 }
 
