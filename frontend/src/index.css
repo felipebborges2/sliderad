@@ -38,7 +38,7 @@ h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 700; }
 a { color: var(--cyan); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-input, textarea, select {
+input:not([type="checkbox"]):not([type="radio"]), textarea, select {
   font-family: var(--font-body);
   font-size: 15px;
   background: var(--navy2);
@@ -50,8 +50,17 @@ input, textarea, select {
   outline: none;
   transition: border-color 0.2s;
 }
-input:focus, textarea:focus { border-color: var(--cyan); }
-input::placeholder, textarea::placeholder { color: var(--muted); }
+
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  outline: none;
+  cursor: pointer;
+}
+input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus { border-color: var(--cyan); }
+input:not([type="checkbox"]):not([type="radio"])::placeholder, textarea::placeholder { color: var(--muted); }
 
 button {
   font-family: var(--font-head);
