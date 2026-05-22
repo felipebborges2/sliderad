@@ -69,14 +69,14 @@ ${temArquivos ? `ARQUIVOS DE REFERÊNCIA:\n${contextoArquivos}` : 'Sem arquivos 
 
 Para cada título, escolha o formato (tópicos ou texto corrido) conforme a natureza do conteúdo. Seja completo e técnico.`;
 
-  const response = await client.messages.create({
+  const stream = client.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 32000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   });
 
-  return parseJSON(response.content[0].text);
+  return parseJSON(await stream.finalText());
 }
 
 async function regenerarSlide({ titulo, todosTitulos, indice, contextoArquivos, usuarioId }) {

@@ -172,14 +172,14 @@ ${temArquivos ? `ARQUIVOS DE REFERÊNCIA FORNECIDOS:\n${contextoArquivos}` : 'Ne
 
 Gere uma apresentação completa, técnica e didática sobre este tema para uma residente de radioterapia apresentar para sua equipe.`;
 
-  const response = await client.messages.create({
+  const stream = client.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 32000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
   });
 
-  const texto = response.content[0].text.trim();
+  const texto = (await stream.finalText()).trim();
 
   // Parse do JSON
   let dados;
